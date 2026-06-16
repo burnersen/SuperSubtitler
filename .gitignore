@@ -1,0 +1,6 @@
+# Build artifacts
+SuperSubtitler_src.zip
+*.exe
+
+# Local Go workspace files
+/vendor/

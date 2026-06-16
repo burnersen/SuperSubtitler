@@ -1,0 +1,34 @@
+@echo off
+REM ============================================================================
+REM  build.bat - SuperSubtitler build script
+REM ----------------------------------------------------------------------------
+REM  Run this from the folder that contains the .go sources (this "src" folder).
+REM
+REM  Steps:
+REM    1) Pack all build-relevant sources into SuperSubtitler_src.zip. This
+REM       archive is embedded into the exe (go:embed) and unpacked into a "src"
+REM       folder on first run, so the exe can always rebuild itself.
+REM    2) Resolve dependencies (go mod tidy).
+REM    3) Build SuperSubtitler.exe (stripped: -ldflags="-s -w") into the parent
+REM       folder, next to ffmpeg / Python / whisper, ready to run.
+REM ============================================================================
+setlocal
+cd /d "%~dp0"
+
+set "ZIP=SuperSubtitler_src.zip"
+set "EXE=..\SuperSubtitler.exe"
+
+echo [1/3] Packing source into %ZIP% ...
+if exist "%ZIP%" del /q "%ZIP%"
+powershell -NoProfile -Command "$inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py') -contains $_.Extension }; if ($inc) { Compress-Archive -Path $inc.FullName -DestinationPath '%ZIP%' -Force }"
+if not exist "%ZIP%" ( echo [ERROR] Could not create %ZIP%. & pause & exit /b 1 )
+
+echo [2/3] Resolving dependencies (go mod tidy) ...
+go mod tidy || ( echo [ERROR] go mod tidy failed. & pause & exit /b 1 )
+
+echo [3/3] Building %EXE% ...
+go build -ldflags="-s -w" -o "%EXE%" || ( echo [ERROR] Build failed. & pause & exit /b 1 )
+
+echo.
+echo Done: %EXE%
+pause
