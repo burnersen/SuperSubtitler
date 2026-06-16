@@ -17,19 +17,11 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 
 **[⬇️ Download the latest release](https://github.com/burnersen/SuperSubtitler/releases/latest)** · **[☕ Buy me a coffee](https://ko-fi.com/T5G0219GA6)**
 
+<img src=".github/screenshot.png" alt="SuperSubtitler recognizing a 30-second English sample flawlessly" width="840">
+
+*A 30-second sample — recognized flawlessly, in English.*
+
 </div>
-
-```
-┌──────────────────────────────────────────────────────────┐
-| SuperSubtitler v0.1.0                                    |
-| automatic subtitles · faster-whisper · self-setup Python |
-└──────────────────────────────────────────────────────────┘
-
- INFO  [1] Movie.mkv — detecting language...
- INFO  [1] Movie.mkv — transcribe with large-v3-turbo (out: de)...
-[1] Movie.mkv transcribing  · ETA 00:00  ████████████████  100% | 1m11s
- SUCCESS  Finished. Done: 1, failed: 0.
-```
 
 ---
 
