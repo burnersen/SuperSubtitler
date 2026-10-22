@@ -15,7 +15,9 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?logo=go)](#-building-from-source)
 [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](#-license)
 
-**[⬇️ Download the latest release](https://github.com/burnersen/SuperSubtitler/releases/latest)** · **[☕ Buy me a coffee](https://ko-fi.com/T5G0219GA6)**
+**[⬇️ Download the latest release](https://github.com/burnersen/SuperSubtitler/releases/latest)** · **[🌐 Website](https://tech.burnersen.de/en/tools/supersubtitler-en/)** · **[☕ Buy me a coffee](https://ko-fi.com/T5G0219GA6)**
+
+<sub>🇩🇪 Auf Deutsch: [tech.burnersen.de/tools/supersubtitler](https://tech.burnersen.de/tools/supersubtitler/)</sub>
 
 <img src=".github/screenshot.png" alt="SuperSubtitler recognizing a 30-second English sample flawlessly" width="840">
 
