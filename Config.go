@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,6 +77,8 @@ type AppConfig struct {
 	noWait        bool   // -nowait: no "Press Enter" at the end
 	json          bool   // -json: machine-readable events on stdout
 	setup         bool   // -setup: install everything (incl. models), then exit
+	noMerge       bool   // -nomerge: never offer merge mode, subtitle every input
+	checkConfig   string // -checkconfig:FILE: validate an INI, print ok/invalid, exit
 	version       bool   // -version: print the version and exit
 	help          bool   // -help: show usage and exit
 	unknownFlags  []string
@@ -133,18 +136,7 @@ func loadOrCreateAppConfig() {
 		writeDefaultConfig(path)
 		return
 	}
-	s := defaultSettings()
-	for _, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
-			continue
-		}
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		applySetting(&s, strings.TrimSpace(key), strings.TrimSpace(val))
-	}
+	s := parseSettings(string(data))
 	if !validateSettings(s) {
 		pWarn.Println("Invalid value in " + configFileName + " — file reset to defaults.")
 		writeDefaultConfig(path)
@@ -232,49 +224,73 @@ func applySetting(s *AppSettings, key, val string) {
 }
 
 func validateSettings(s AppSettings) bool {
-	if s.detectSeconds < 30 || s.detectSeconds > 1800 {
-		return false
+	return settingsProblem(s) == ""
+}
+
+// settingsProblem names the first out-of-range value, or "" when all are valid.
+// The text is shown by -checkconfig, so a front-end can refuse to save a value
+// that would otherwise make the next start reset the whole file.
+func settingsProblem(s AppSettings) string {
+	switch {
+	case s.detectSeconds < 30 || s.detectSeconds > 1800:
+		return "detect_seconds must be 30..1800"
+	case s.detectStartPercent < 0 || s.detectStartPercent > 90:
+		return "detect_start_percent must be 0..90"
+	case s.device != "cuda" && s.device != "cpu":
+		return "device must be cuda or cpu"
+	case s.surroundMode != "center_emphasis" && s.surroundMode != "pure_center":
+		return "surround_mode must be center_emphasis or pure_center"
+	case s.beamSize < 1 || s.beamSize > 10:
+		return "beam_size must be 1..10"
+	case s.vadThreshold < 0 || s.vadThreshold > 1:
+		return "vad_threshold must be 0..1"
+	case s.leadinMs < 0 || s.leadinMs > 5000:
+		return "leadin_ms must be 0..5000"
+	case s.subMaxCharsPerLine < 20 || s.subMaxCharsPerLine > 80:
+		return "sub_max_chars_per_line must be 20..80"
+	case s.subMaxLines < 1 || s.subMaxLines > 3:
+		return "sub_max_lines must be 1..3"
+	case s.subMaxCPS < 5 || s.subMaxCPS > 40:
+		return "sub_max_cps must be 5..40"
+	case s.subMinDurMs < 200 || s.subMinDurMs > s.subMaxDurMs:
+		return "sub_min_dur_ms must be at least 200 and not above sub_max_dur_ms"
+	case s.subMaxDurMs < 1000 || s.subMaxDurMs > 20000:
+		return "sub_max_dur_ms must be 1000..20000"
+	case s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "":
+		return "detect_model, model_transcribe, model_translate and compute_type must not be empty"
+	case s.engineSpec == "" || strings.Count(s.pythonVersion, ".") < 2:
+		return "engine_spec must not be empty and python_version must be X.Y.Z"
 	}
-	if s.detectStartPercent < 0 || s.detectStartPercent > 90 {
-		return false
+	return ""
+}
+
+// parseSettings reads INI text over the defaults. Unknown keys are ignored.
+func parseSettings(text string) AppSettings {
+	s := defaultSettings()
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		applySetting(&s, strings.TrimSpace(key), strings.TrimSpace(val))
 	}
-	if s.device != "cuda" && s.device != "cpu" {
-		return false
+	return s
+}
+
+// checkConfigFile validates an INI file without touching it (-checkconfig).
+func checkConfigFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
 	}
-	if s.surroundMode != "center_emphasis" && s.surroundMode != "pure_center" {
-		return false
+	if p := settingsProblem(parseSettings(string(data))); p != "" {
+		return errors.New(p)
 	}
-	if s.beamSize < 1 || s.beamSize > 10 {
-		return false
-	}
-	if s.vadThreshold < 0 || s.vadThreshold > 1 {
-		return false
-	}
-	if s.leadinMs < 0 || s.leadinMs > 5000 {
-		return false
-	}
-	if s.subMaxCharsPerLine < 20 || s.subMaxCharsPerLine > 80 {
-		return false
-	}
-	if s.subMaxLines < 1 || s.subMaxLines > 3 {
-		return false
-	}
-	if s.subMaxCPS < 5 || s.subMaxCPS > 40 {
-		return false
-	}
-	if s.subMinDurMs < 200 || s.subMinDurMs > s.subMaxDurMs {
-		return false
-	}
-	if s.subMaxDurMs < 1000 || s.subMaxDurMs > 20000 {
-		return false
-	}
-	if s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "" {
-		return false
-	}
-	if s.engineSpec == "" || strings.Count(s.pythonVersion, ".") < 2 {
-		return false
-	}
-	return true
+	return nil
 }
 
 func writeDefaultConfig(path string) {

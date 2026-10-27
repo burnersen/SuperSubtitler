@@ -84,6 +84,16 @@ func run() (code int) {
 		fmt.Println(appVersion)
 		return exitOK
 	}
+	// -checkconfig:FILE validates an INI without changing anything, so a
+	// front-end can refuse a value that would make the next start reset it.
+	if cfg.checkConfig != "" {
+		if err := checkConfigFile(cfg.checkConfig); err != nil {
+			fmt.Println("invalid: " + err.Error())
+			return exitFailed
+		}
+		fmt.Println("ok")
+		return exitOK
+	}
 	// -json must switch the channels before the very first output line.
 	if cfg.json {
 		enableJSONMode()
@@ -156,7 +166,7 @@ func run() (code int) {
 	// Auto-detect a merge job (1 video + dropped audio/subtitle files) and offer
 	// to mux them into one file, before falling through to normal subtitling.
 	// Merging needs FFmpeg only, so it never waits for the Python setup.
-	if !cfg.split {
+	if !cfg.split && !cfg.noMerge {
 		if video, audios, subs, ok := classifyMergeInputs(cfg.inputArgs); ok {
 			if askMerge(video, audios, subs, cfg.auto) {
 				emitRun("merge", 1, cfg)
@@ -309,6 +319,7 @@ func printUsage() {
 		{pterm.LightCyan("-out:DIR"), "Write .srt/.mkv results into DIR instead of next to the source."},
 		{pterm.LightCyan("-nowait"), "Do not wait for Enter at the end."},
 		{pterm.LightCyan("-setup"), "Download and install everything (incl. speech models), then exit."},
+		{pterm.LightCyan("-nomerge"), "Never offer the merge mode; subtitle every dropped file."},
 		{pterm.LightCyan("-json"), "Machine-readable events on stdout (for front-ends); implies -nowait."},
 		{pterm.LightCyan("-version"), "Print the version and exit."},
 		{pterm.LightCyan("-help"), "Show this help."},
@@ -523,6 +534,10 @@ func parseArgs(argv []string) *AppConfig {
 			cfg.json = true
 		case low == "-setup":
 			cfg.setup = true
+		case low == "-nomerge":
+			cfg.noMerge = true
+		case strings.HasPrefix(low, "-checkconfig:"):
+			cfg.checkConfig = strings.Trim(a[len("-checkconfig:"):], `"`)
 		case low == "-version" || low == "--version":
 			cfg.version = true
 		case low == "-help" || low == "-h" || low == "-?" || low == "--help":

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -208,5 +209,29 @@ func TestModelMarkerRoundTrip(t *testing.T) {
 	}
 	if got := readModelMarker(p); !reflect.DeepEqual(got, in) {
 		t.Errorf("round trip = %v", got)
+	}
+}
+
+func TestNewToolFlags(t *testing.T) {
+	cfg := parseArgs([]string{"-nomerge", `-checkconfig:"C:\x\a.ini"`})
+	if !cfg.noMerge || cfg.checkConfig != `C:\x\a.ini` {
+		t.Errorf("got %+v", cfg)
+	}
+}
+
+func TestCheckConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.ini")
+	bad := filepath.Join(dir, "bad.ini")
+	_ = os.WriteFile(good, []byte("[subtitles]\nsub_max_lines=2\n"), 0644)
+	_ = os.WriteFile(bad, []byte("sub_max_lines=9\n"), 0644)
+	if err := checkConfigFile(good); err != nil {
+		t.Errorf("good config rejected: %v", err)
+	}
+	if err := checkConfigFile(bad); err == nil || !strings.Contains(err.Error(), "sub_max_lines") {
+		t.Errorf("bad config: %v", err)
+	}
+	if data, _ := os.ReadFile(bad); string(data) != "sub_max_lines=9\n" {
+		t.Error("-checkconfig must never rewrite the file")
 	}
 }
