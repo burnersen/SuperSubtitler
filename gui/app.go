@@ -387,8 +387,40 @@ func (a *App) GetSettings() SettingsView {
 		return v
 	}
 	v.Exists = true
-	v.Sections = core.ParseIni(string(raw))
+	v.Sections = core.WithDefaults(core.ParseIni(string(raw)), cliDefaults())
 	return v
+}
+
+var (
+	defaultsMu  sync.Mutex
+	defaultsMap map[string]string
+)
+
+// cliDefaults asks the CLI for its default INI (-printdefaults) so the page
+// can show every default without keeping its own copy. Only an answer is
+// remembered: if the CLI was missing or too old (it does not know the flag),
+// the next visit of the page asks again.
+func cliDefaults() map[string]string {
+	defaultsMu.Lock()
+	defer defaultsMu.Unlock()
+	if defaultsMap != nil {
+		return defaultsMap
+	}
+	func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, cliPath(), "-printdefaults")
+		cmd.Dir = guiDir()
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+		out, err := cmd.Output()
+		if err != nil {
+			return
+		}
+		if m := core.IniValues(string(out)); m["detect_seconds"] != "" {
+			defaultsMap = m
+		}
+	}()
+	return defaultsMap
 }
 
 // SaveSettings writes changed values in place. The CLI checks the result

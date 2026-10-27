@@ -83,6 +83,7 @@ type AppConfig struct {
 	setup         bool   // -setup: install everything (incl. models), then exit
 	noMerge       bool   // -nomerge: never offer merge mode, subtitle every input
 	checkConfig   string // -checkconfig:FILE: validate an INI, print ok/invalid, exit
+	printDefaults bool   // -printdefaults: print the default INI, exit
 	version       bool   // -version: print the version and exit
 	help          bool   // -help: show usage and exit
 	unknownFlags  []string
@@ -252,6 +253,8 @@ func settingsProblem(s AppSettings) string {
 		return "beam_size must be 1..10"
 	case s.vadThreshold < 0 || s.vadThreshold > 1:
 		return "vad_threshold must be 0..1"
+	case s.vadSpeechPadMs < 0 || s.vadSpeechPadMs > 2000:
+		return "vad_speech_pad_ms must be 0..2000"
 	case s.leadinMs < 0 || s.leadinMs > 5000:
 		return "leadin_ms must be 0..5000"
 	case s.subMaxCharsPerLine < 20 || s.subMaxCharsPerLine > 80:
@@ -264,6 +267,10 @@ func settingsProblem(s AppSettings) string {
 		return "sub_min_dur_ms must be at least 200 and not above sub_max_dur_ms"
 	case s.subMaxDurMs < 1000 || s.subMaxDurMs > 20000:
 		return "sub_max_dur_ms must be 1000..20000"
+	case s.subMinGapMs < 0 || s.subMinGapMs > 1000:
+		return "sub_min_gap_ms must be 0..1000"
+	case s.subGapSplitMs < 100 || s.subGapSplitMs > 5000:
+		return "sub_gap_split_ms must be 100..5000"
 	case s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "":
 		return "detect_model, model_transcribe, model_translate and compute_type must not be empty"
 	case s.engineSpec == "" || strings.Count(s.pythonVersion, ".") < 2:
@@ -301,9 +308,21 @@ func checkConfigFile(path string) error {
 	return nil
 }
 
+// writeDefaultConfig writes the documented default INI and makes it active.
 func writeDefaultConfig(path string) {
+	if err := os.WriteFile(path, []byte(defaultConfigText()), 0644); err != nil {
+		pWarn.Printf("Could not write %s: %v\n", configFileName, err)
+		return
+	}
+	appSettings = defaultSettings()
+	pInfo.Println("Created " + pterm.LightCyan(configFileName) + " with default settings.")
+}
+
+// defaultConfigText is the complete default INI (-printdefaults prints it, so
+// a front-end can show every default without keeping its own copy).
+func defaultConfigText() string {
 	d := defaultSettings()
-	content := fmt.Sprintf(`# SuperSubtitler configuration
+	return fmt.Sprintf(`# SuperSubtitler configuration
 # Delete this file to regenerate defaults. Invalid values reset the whole file.
 
 [detection]
@@ -379,10 +398,4 @@ sub_gap_split_ms=%d
 		d.subMaxCharsPerLine, d.subMaxLines, d.subMaxCPS,
 		d.subMinDurMs, d.subMaxDurMs, d.subMinGapMs, d.subGapSplitMs,
 	)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		pWarn.Printf("Could not write %s: %v\n", configFileName, err)
-		return
-	}
-	appSettings = d
-	pInfo.Println("Created " + pterm.LightCyan(configFileName) + " with default settings.")
 }

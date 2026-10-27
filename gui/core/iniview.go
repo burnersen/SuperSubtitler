@@ -15,10 +15,11 @@ import (
 
 // IniKey is one "key=value" line and the comment lines directly above it.
 type IniKey struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-	Help  string `json:"help"`
-	Hint  string `json:"hint"` // allowed values, when known
+	Key     string  `json:"key"`
+	Value   string  `json:"value"`
+	Help    string  `json:"help"` // the comment above the key in the file
+	Doc     *KeyDoc `json:"doc"`  // plain-words description, nil if unknown
+	Default string  `json:"default"`
 }
 
 // IniSection is one [section] with its leading comment block.
@@ -26,27 +27,6 @@ type IniSection struct {
 	Name string   `json:"name"`
 	Help string   `json:"help"`
 	Keys []IniKey `json:"keys"`
-}
-
-// keyHints mirror the CLI's validation (Config.go settingsProblem). They are
-// only shown as help; the CLI's own -checkconfig decides what is saved.
-var keyHints = map[string]string{
-	"detect_seconds":             "30 – 1800",
-	"detect_start_percent":       "0 – 90",
-	"device":                     "cuda | cpu",
-	"beam_size":                  "1 – 10",
-	"vad_filter":                 "true | false",
-	"vad_threshold":              "0 – 1",
-	"install_cuda":               "true | false",
-	"condition_on_previous_text": "true | false",
-	"leadin_ms":                  "0 – 5000",
-	"surround_mode":              "center_emphasis | pure_center",
-	"sub_max_chars_per_line":     "20 – 80",
-	"sub_max_lines":              "1 – 3",
-	"sub_max_cps":                "5 – 40",
-	"sub_min_dur_ms":             "200 – sub_max_dur_ms",
-	"sub_max_dur_ms":             "1000 – 20000",
-	"python_version":             "X.Y.Z with a python.org embed build",
 }
 
 // ParseIni reads the INI text into sections. Keys before any [section] land in
@@ -93,11 +73,33 @@ func ParseIni(text string) []IniSection {
 				// The block under the header describes the whole section.
 				cur.Help, help = help, ""
 			}
-			cur.Keys = append(cur.Keys, IniKey{Key: key, Value: strings.TrimSpace(val), Help: help, Hint: keyHints[key]})
+			cur.Keys = append(cur.Keys, IniKey{Key: key, Value: strings.TrimSpace(val), Help: help, Doc: DocFor(key)})
 		}
 	}
 	if started || len(cur.Keys) > 0 {
 		sections = append(sections, cur)
+	}
+	return sections
+}
+
+// IniValues returns key -> value of an INI text (used for the CLI's defaults).
+func IniValues(text string) map[string]string {
+	out := map[string]string{}
+	for _, sec := range ParseIni(text) {
+		for _, k := range sec.Keys {
+			out[k.Key] = k.Value
+		}
+	}
+	return out
+}
+
+// WithDefaults fills in each key's default value (from IniValues of the
+// CLI's -printdefaults output).
+func WithDefaults(sections []IniSection, defaults map[string]string) []IniSection {
+	for i := range sections {
+		for j := range sections[i].Keys {
+			sections[i].Keys[j].Default = defaults[sections[i].Keys[j].Key]
+		}
 	}
 	return sections
 }

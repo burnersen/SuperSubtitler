@@ -24,7 +24,7 @@ import (
 var assets embed.FS
 
 // guiVersion is the one place the window's version is written.
-const guiVersion = "0.2.0"
+const guiVersion = "0.2.1"
 
 // singleInstanceID must never change, or a new build would not find an old
 // window that is already open.

@@ -384,12 +384,69 @@
     return { video: videos[0].path, extras: extras.map((e) => e.path), error: "" };
   }
 
+  // ------------------------------------------------------------------------
+  // Settings page: is a value allowed, recommended, or a mistake?
+  // ------------------------------------------------------------------------
+
+  // checkSetting judges one value against its description (doc from
+  // gui/core/keydocs.go). level: "ok" | "warn" (allowed, but outside the
+  // advice — results may suffer) | "error" (not accepted, saving is blocked).
+  function checkSetting(doc, value, defaultValue) {
+    const v = String(value == null ? "" : value).trim();
+    if (!doc) return { level: "ok", msg: "" };
+    const range = (a, b) => (a === b ? String(a) : a + " – " + b);
+    switch (doc.kind) {
+      case "int":
+      case "float": {
+        const ok = doc.kind === "int" ? /^-?\d+$/.test(v) : /^-?\d+(\.\d+)?$/.test(v);
+        if (!ok) return { level: "error", msg: doc.kind === "int" ? "Enter a whole number." : "Enter a number (use a dot: 0.5)." };
+        const n = Number(v);
+        if ((doc.min != null && n < doc.min) || (doc.max != null && n > doc.max)) {
+          return { level: "error", msg: "Not accepted — allowed is " + range(doc.min, doc.max) + "." };
+        }
+        if ((doc.recMin != null && n < doc.recMin) || (doc.recMax != null && n > doc.recMax)) {
+          return { level: "warn", msg: "Allowed, but outside the recommended " + range(doc.recMin, doc.recMax) + " — results may suffer." };
+        }
+        return { level: "ok", msg: "" };
+      }
+      case "bool":
+        return v === "true" || v === "false" ? { level: "ok", msg: "" } : { level: "error", msg: "Must be true or false." };
+      case "choice": {
+        const known = (doc.choices || []).some((c) => c.value === v);
+        if (known) return { level: "ok", msg: "" };
+        if (!v) return { level: "error", msg: "Choose a value." };
+        return doc.open
+          ? { level: "warn", msg: "Not one of the listed values — not part of the tested set." }
+          : { level: "error", msg: "Not accepted — choose one of the listed values." };
+      }
+      default: // text
+        if (doc.expert && defaultValue != null && defaultValue !== "" && v !== defaultValue) {
+          return { level: "warn", msg: "Changing this leaves SuperSubtitler's tested setup — only if you know why." };
+        }
+        return { level: "ok", msg: "" };
+    }
+  }
+
+  // crossCheck finds rules that tie two settings together.
+  function crossCheck(values) {
+    const out = {};
+    const min = Number(values.sub_min_dur_ms);
+    const max = Number(values.sub_max_dur_ms);
+    if (Number.isFinite(min) && Number.isFinite(max) && min > max) {
+      out.sub_min_dur_ms = "Must not be longer than the longest display time (" + max + " ms).";
+    }
+    if (/turbo/.test(String(values.model_translate || ""))) {
+      out.model_translate = "A turbo model cannot translate — use large-v3.";
+    }
+    return out;
+  }
+
   const api = {
     escapeHtml, ansiToHtml, formatDuration, formatMB, pathKey, baseName, dirName,
     LANGUAGES, languageName, validLanguage,
     tracksAnswer, autoTracksAnswer, rememberLangs,
     stageText, createRun, applyEvent, finishRun, overallPercent, counts, setupProgress,
-    mergeSelection
+    mergeSelection, checkSetting, crossCheck
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SSLogic = api;

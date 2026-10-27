@@ -29,7 +29,7 @@ import (
 
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
-const appVersion = "0.2.0"
+const appVersion = "0.2.1"
 
 // Embedded source archive, self-extracted into src/ on first run only. The
 // build step regenerates SuperSubtitler_src.zip from the .go sources.
@@ -87,6 +87,11 @@ func run() (code int) {
 	if cfg.version {
 		fmt.Println(appVersion)
 		fmt.Println(runtimeSummary())
+		return exitOK
+	}
+	// -printdefaults prints the documented default INI (for front-ends).
+	if cfg.printDefaults {
+		fmt.Print(defaultConfigText())
 		return exitOK
 	}
 	// -checkconfig:FILE validates an INI without changing anything, so a
@@ -545,6 +550,8 @@ func parseArgs(argv []string) *AppConfig {
 			cfg.setup = true
 		case low == "-nomerge":
 			cfg.noMerge = true
+		case low == "-printdefaults":
+			cfg.printDefaults = true
 		case strings.HasPrefix(low, "-checkconfig:"):
 			cfg.checkConfig = strings.Trim(a[len("-checkconfig:"):], `"`)
 		case low == "-version" || low == "--version":
