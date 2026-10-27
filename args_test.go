@@ -123,6 +123,10 @@ func TestCollectInputFilesSkipsAndForce(t *testing.T) {
 	if len(files) != 2 {
 		t.Errorf("-force should take b.mkv again, files = %q", files)
 	}
+	files, _ = collectInputFiles(&AppConfig{split: true}, []string{dir})
+	if len(files) != 2 {
+		t.Errorf("-split must not skip subtitled files, files = %q", files)
+	}
 }
 
 func TestUniqueSRTPath(t *testing.T) {

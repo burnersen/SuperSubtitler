@@ -217,6 +217,7 @@ a.link:hover { text-decoration: underline; }
     <nav>
       <button class="nav-item active" data-page="subtitle">Subtitle</button>
       <button class="nav-item" data-page="merge">Merge</button>
+      <button class="nav-item" data-page="split">Split</button>
       <button class="nav-item" data-page="settings">Settings</button>
       <button class="nav-item" data-page="about">About</button>
     </nav>
@@ -257,7 +258,7 @@ a.link:hover { text-decoration: underline; }
         </div>
 
         <div class="panel options">
-          <h2>Options</h2>
+          <div class="files-head"><h2>Options</h2><button class="btn small" id="opt-reset" title="Back to the standard options">Reset</button></div>
           <label class="field"><span>Spoken language</span>
             <select id="opt-lang"></select>
           </label>
@@ -275,6 +276,19 @@ a.link:hover { text-decoration: underline; }
             <span>Silence filter<small>No subtitles during pauses. Turn off only if speech gets lost.</small></span></label>
           <label class="opt"><input type="checkbox" id="opt-lowmem" />
             <span>Less video memory<small>For smaller graphics cards; a little slower.</small></span></label>
+          <label class="field"><span>Audio channel</span>
+            <select id="opt-channel">
+              <option value="">Automatic (voice-focused mix)</option>
+              <option value="0">Channel 0 — front left</option>
+              <option value="1">Channel 1 — front right</option>
+              <option value="2">Channel 2 — centre (dialogue in 5.1/7.1)</option>
+              <option value="3">Channel 3 — LFE (subwoofer)</option>
+              <option value="4">Channel 4 — rear/side left</option>
+              <option value="5">Channel 5 — rear/side right</option>
+              <option value="6">Channel 6 — side left (7.1)</option>
+              <option value="7">Channel 7 — side right (7.1)</option>
+            </select>
+          </label>
           <label class="opt"><input type="checkbox" id="opt-force" />
             <span>Redo finished files<small>Files that already have subtitles are done again (old results are replaced).</small></span></label>
           <label class="opt"><input type="checkbox" id="opt-auto" />
@@ -326,6 +340,39 @@ a.link:hover { text-decoration: underline; }
       </div>
     </section>
 
+    <!-- ================================= Split ================================= -->
+    <section class="page" id="page-split">
+      <div>
+        <h1>Split</h1>
+        <p class="lead">Subtitles miss the voice? Export every channel of the audio track as its own WAV
+          (<code>Movie.ch00.wav</code>, <code>Movie.ch01.wav</code>, …) next to the file and listen which one carries the speech.
+          Then choose that channel under <b>Audio channel</b> on the Subtitle page. Nothing is transcribed here.</p>
+      </div>
+      <div class="panel files" style="min-height: 260px">
+        <div class="files-head">
+          <h2 id="split-count">Files</h2>
+          <div class="row-actions">
+            <label class="field" style="display:flex;gap:8px;align-items:center;margin:0">
+              <span style="color:var(--muted);font-size:12.5px;white-space:nowrap">Audio track</span>
+              <input type="text" id="split-track" value="1" maxlength="2" style="width:48px" title="Which audio track to split (1 = the first)" />
+            </label>
+            <button class="btn small" id="split-add-files">Add files</button>
+            <button class="btn small" id="split-add-folder">Add folder</button>
+            <button class="btn small" id="split-clear">Clear</button>
+          </div>
+        </div>
+        <div class="list" id="split-list"></div>
+      </div>
+      <div class="panel runbar">
+        <button class="btn primary" id="split-start">Split channels</button>
+        <button class="btn danger" id="split-stop" disabled>Stop</button>
+        <div class="status">
+          <div class="text" id="split-status">Add the files whose channels you want to hear separately.</div>
+          <div class="bar" id="split-bar"><i></i></div>
+        </div>
+      </div>
+    </section>
+
     <!-- =============================== Settings =============================== -->
     <section class="page" id="page-settings">
       <div>
@@ -337,6 +384,7 @@ a.link:hover { text-decoration: underline; }
       <div class="save-line">
         <button class="btn primary" id="settings-save" disabled>Save settings</button>
         <button class="btn" id="settings-reload">Reload</button>
+        <button class="btn" id="settings-defaults" title="Write SuperSubtitler's standard settings again; your current file is kept as .bak">Restore defaults</button>
         <span class="note" id="settings-note"></span>
       </div>
       <div class="panel">
@@ -346,6 +394,7 @@ a.link:hover { text-decoration: underline; }
         <textarea class="cleaner" id="cleaner-text" spellcheck="false"></textarea>
         <div class="row-actions" style="margin-top: 10px">
           <button class="btn primary" id="cleaner-save">Save list</button>
+          <button class="btn" id="cleaner-defaults" title="The standard list again; your current list is kept as .bak">Restore default list</button>
           <span class="note" id="cleaner-note"></span>
         </div>
       </div>
@@ -416,6 +465,8 @@ const state = {
   cli: null,
   subItems: [],          // {id, path, name, dir, kind}
   mergeItems: [],
+  splitItems: [],
+  dialogKind: "",        // "question" (the CLI waits) or "confirm" (the window asks)
   nextId: 1,
   running: false,
   stopping: false,
@@ -541,11 +592,21 @@ async function downloadCLI() {
 // ---------------------------------------------------------------------------
 // File lists
 // ---------------------------------------------------------------------------
-function listFor(page) { return page === "merge" ? state.mergeItems : state.subItems; }
+function listFor(page) {
+  if (page === "merge") return state.mergeItems;
+  if (page === "split") return state.splitItems;
+  return state.subItems;
+}
+
+function renderList(page) {
+  if (page === "merge") renderMerge();
+  else if (page === "split") renderSplit();
+  else renderSubList();
+}
 
 async function addPaths(paths, page) {
   if (!paths || paths.length === 0) return;
-  if (page !== "merge") page = "subtitle";
+  if (page !== "merge" && page !== "split") page = "subtitle";
   let res;
   try { res = await App().AddPaths(paths, page); } catch (e) { toast(errText(e), true); return; }
   takeItems(res, page);
@@ -569,7 +630,7 @@ function takeItems(res, page) {
   } else if (added === 0 && (res.items || []).length === 0) {
     toast("Nothing usable found there.", true);
   }
-  page === "merge" ? renderMerge() : renderSubList();
+  renderList(page);
 }
 
 async function pick(kind, page) {
@@ -582,7 +643,7 @@ async function pick(kind, page) {
 function rowFor(id) { return state.model && state.model.rows[id]; }
 
 function itemHtml(it, page) {
-  const r = (state.model && state.model.kind === (page === "merge" ? "merge" : "subtitle")) ? rowFor(it.id) : null;
+  const r = (state.model && state.model.kind === page) ? rowFor(it.id) : null;
   const status = r ? r.status : "waiting";
   const labels = { waiting: "waiting", analysing: "analysing", working: "working", done: "done", failed: "failed", skipped: "skipped", stopped: "stopped" };
   let meta = '<span class="chip ' + status + '">' + labels[status] + "</span>";
@@ -596,6 +657,7 @@ function itemHtml(it, page) {
       if (r.eta > 0) s += " · " + L.formatDuration(r.eta) + " left";
       meta += "<span>" + L.escapeHtml(s) + "</span>";
     }
+    if (page === "split" && status === "done" && r.outputs.length) meta += "<span>" + r.outputs.length + " channel file(s) written</span>";
     if (r.message) meta += '<span class="' + (status === "failed" ? "msg-bad" : "") + '">' + L.escapeHtml(r.message) + "</span>";
   }
   const showBar = r && (status === "working" || status === "analysing" || status === "done");
@@ -620,7 +682,7 @@ function wireRowButtons(box, page) {
       const list = listFor(page);
       const i = list.findIndex((x) => x.id === id);
       if (i >= 0) list.splice(i, 1);
-      page === "merge" ? renderMerge() : renderSubList();
+      renderList(page);
     };
   });
 }
@@ -650,10 +712,10 @@ function renderRow(id, page) {
 }
 
 // The list follows the work — unless the user scrolled in the last 20 s.
-const lastUserScroll = { subtitle: 0, merge: 0 };
+const lastUserScroll = { subtitle: 0, merge: 0, split: 0 };
 function followRow(el, page) {
   if (Date.now() - lastUserScroll[page] < 20000) return;
-  const box = $(page === "merge" ? "merge-list" : "sub-list");
+  const box = $(page === "merge" ? "merge-list" : page === "split" ? "split-list" : "sub-list");
   const top = el.offsetTop - box.offsetTop;
   if (top < box.scrollTop || top + el.offsetHeight > box.scrollTop + box.clientHeight) {
     box.scrollTop = Math.max(0, top - 40);
@@ -677,6 +739,18 @@ function renderMerge() {
   }
 }
 
+function renderSplit() {
+  const box = $("split-list");
+  $("split-count").textContent = state.splitItems.length ? "Files (" + state.splitItems.length + ")" : "Files";
+  if (state.splitItems.length === 0) {
+    box.innerHTML = '<div class="empty"><b>Drop videos or audio files here</b>' +
+      "Each channel of the chosen audio track becomes its own WAV next to the file.</div>";
+    return;
+  }
+  box.innerHTML = state.splitItems.map((it) => itemHtml(it, "split")).join("");
+  wireRowButtons(box, "split");
+}
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -692,7 +766,7 @@ const optionIds = ["opt-translate", "opt-srtonly", "opt-lean", "opt-vad", "opt-l
 let outDir = "";
 
 function saveOptions() {
-  const o = { lang: $("opt-lang").value, other: $("opt-lang-other").value, outmode: $("opt-outmode").value, outDir };
+  const o = { lang: $("opt-lang").value, other: $("opt-lang-other").value, outmode: $("opt-outmode").value, outDir, channel: $("opt-channel").value };
   optionIds.forEach((id) => { o[id] = $(id).checked; });
   store("ss.options", o);
 }
@@ -705,6 +779,20 @@ function restoreOptions() {
   optionIds.forEach((id) => { if (typeof o[id] === "boolean") $(id).checked = o[id]; });
   outDir = o.outDir || "";
   $("opt-outmode").value = o.outmode === "folder" && outDir ? "folder" : "beside";
+  $("opt-channel").value = o.channel || "";
+}
+
+// resetOptions: the standard choices — detect the language, silence filter
+// on, everything else off, results next to the source.
+function resetOptions() {
+  $("opt-lang").value = "";
+  $("opt-lang-other").value = "";
+  $("opt-channel").value = "";
+  $("opt-outmode").value = "beside";
+  optionIds.forEach((id) => { $(id).checked = id === "opt-vad"; });
+  syncOptionUI();
+  saveOptions();
+  toast("Options are back to standard.");
 }
 
 function syncOptionUI() {
@@ -728,7 +816,8 @@ function readOptions() {
     lowMem: $("opt-lowmem").checked,
     auto: $("opt-auto").checked,
     force: $("opt-force").checked,
-    outDir: $("opt-outmode").value === "folder" ? outDir : ""
+    outDir: $("opt-outmode").value === "folder" ? outDir : "",
+    channel: $("opt-channel").value
   };
 }
 
@@ -742,8 +831,11 @@ function setRunning(running, stopping) {
   $("sub-stop").disabled = !running || state.kind === "merge";
   $("sub-stop").textContent = stopping ? "Stop now" : "Stop";
   $("merge-start").disabled = running;
-  ["sub-add-files", "sub-add-folder", "sub-clear", "merge-add-files", "merge-clear", "about-setup-run", "about-download"].forEach((id) => { $(id).disabled = running; });
-  optionIds.concat(["opt-lang", "opt-lang-other", "opt-outmode"]).forEach((id) => { $(id).disabled = running; });
+  $("split-start").disabled = running;
+  $("split-stop").disabled = !running || state.kind !== "split";
+  ["sub-add-files", "sub-add-folder", "sub-clear", "merge-add-files", "merge-clear", "split-add-files", "split-add-folder",
+    "split-clear", "split-track", "opt-reset", "about-setup-run", "about-download", "settings-defaults", "cleaner-defaults"].forEach((id) => { $(id).disabled = running; });
+  optionIds.concat(["opt-lang", "opt-lang-other", "opt-outmode", "opt-channel"]).forEach((id) => { $(id).disabled = running; });
   if (!running) syncOptionUI();
 }
 
@@ -799,6 +891,27 @@ async function startMerge() {
     setRunning(false);
     $("merge-bar").className = "bar";
     $("merge-status").textContent = errText(e);
+    toast(errText(e), true);
+  }
+}
+
+async function startSplit() {
+  if (state.splitItems.length === 0) { toast("Add some files first.", true); return; }
+  const raw = $("split-track").value.trim();
+  const track = raw === "" ? 1 : Number(raw);
+  if (!Number.isInteger(track) || track < 1 || track > 99) { toast("Audio track must be a number from 1 to 99.", true); return; }
+  state.kind = "split";
+  state.model = L.createRun("split", state.splitItems);
+  resetRunMemory();
+  renderSplit();
+  try {
+    setRunning(true);
+    $("split-status").textContent = "Splitting…";
+    await App().StartSplit(track, state.splitItems.map((it) => it.path));
+    App().ShowBusy();
+  } catch (e) {
+    setRunning(false);
+    $("split-status").textContent = errText(e);
     toast(errText(e), true);
   }
 }
@@ -862,7 +975,7 @@ function onEvent(ev) {
   const m = state.model;
   if (!m) return;
   const id = L.applyEvent(m, ev);
-  const page = m.kind === "merge" ? "merge" : "subtitle";
+  const page = m.kind === "merge" || m.kind === "split" ? m.kind : "subtitle";
   if (id !== null && id !== undefined) renderRow(id, page);
   switch (ev.ev) {
     case "setup": renderSetup(); break;
@@ -870,6 +983,13 @@ function onEvent(ev) {
     case "error": toast(ev.message, true); break;
   }
   if (m.kind === "subtitle") renderOverall();
+  if (m.kind === "split") {
+    const c = L.counts(m);
+    const pct = L.overallPercent(m);
+    $("split-bar").firstElementChild.style.width = pct + "%";
+    $("split-status").textContent = (c.done + c.failed) + " of " + m.order.length + " files split…";
+    if (pct !== state.lastPct) { state.lastPct = pct; App().ShowProgress(pct); }
+  }
 }
 
 function onState(s) {
@@ -911,6 +1031,13 @@ function onState(s) {
     const ok = r && r.status === "done";
     $("merge-bar").firstElementChild.style.width = ok ? "100%" : "0";
     $("merge-status").textContent = ok ? "Merged → " + L.baseName(r.outputs[0]) : ("Not merged: " + ((r && r.message) || "see the log"));
+  } else if (m && m.kind === "split") {
+    renderSplit();
+    const c = L.counts(m);
+    $("split-bar").firstElementChild.style.width = L.overallPercent(m) + "%";
+    $("split-status").textContent = (cancelled ? "Stopped. " : "Finished. ") + c.done + " file(s) split" +
+      (c.failed ? ", " + c.failed + " failed" : "") + (c.stopped ? ", " + c.stopped + " not done" : "") +
+      (c.done ? " — listen to the .chNN.wav files, then pick the channel on the Subtitle page." : "");
   } else if (m && m.kind === "setup") {
     $("sub-status").innerHTML = cancelled ? "<b>Setup stopped.</b>" :
       (m.errors.length ? "<b>Setup failed:</b> " + L.escapeHtml(m.errors[0]) : "<b>Setup complete</b> — ready to subtitle.");
@@ -921,7 +1048,20 @@ function onState(s) {
 // ---------------------------------------------------------------------------
 // Questions
 // ---------------------------------------------------------------------------
-function closeDialog() { $("dialog").hidden = true; $("dialog-box").innerHTML = ""; }
+function closeDialog() { $("dialog").hidden = true; $("dialog-box").innerHTML = ""; state.dialogKind = ""; }
+
+// confirmBox asks the user (not the CLI) before something cannot be undone.
+function confirmBox(title, text, okLabel) {
+  return new Promise((resolve) => {
+    state.dialogKind = "confirm";
+    $("dialog-box").innerHTML = "<h3>" + L.escapeHtml(title) + "</h3><p>" + L.escapeHtml(text) + "</p>" +
+      '<div class="foot"><button class="btn" id="c-no">Cancel</button><button class="btn primary" id="c-yes">' + L.escapeHtml(okLabel) + "</button></div>";
+    $("dialog").hidden = false;
+    $("c-no").onclick = () => { closeDialog(); resolve(false); };
+    $("c-yes").onclick = () => { closeDialog(); resolve(true); };
+    $("c-no").focus();
+  });
+}
 
 function answer(text) {
   closeDialog();
@@ -999,6 +1139,7 @@ function handleQuestion(q) {
     App().Answer("").catch(() => {});
     return;
   }
+  state.dialogKind = "question";
   $("dialog").hidden = false;
   const first = box.querySelector(".btn.primary");
   if (first) first.focus();
@@ -1089,6 +1230,39 @@ async function saveCleaner() {
   }
 }
 
+async function restoreSettingsDefaults() {
+  const ok = await confirmBox("Restore the standard settings?",
+    "Every value in SuperSubtitler_Config.ini goes back to SuperSubtitler's defaults. Your current file is kept as SuperSubtitler_Config.ini.bak.",
+    "Restore defaults");
+  if (!ok) return;
+  const note = $("settings-note");
+  try {
+    renderSettings(await App().ResetSettings());
+    note.className = "note ok";
+    note.textContent = "Standard settings restored (the previous file is SuperSubtitler_Config.ini.bak).";
+  } catch (e) {
+    note.className = "note bad";
+    note.textContent = errText(e);
+  }
+}
+
+async function restoreCleanerDefaults() {
+  const ok = await confirmBox("Restore the standard list?",
+    "The cleaner's term list goes back to SuperSubtitler's suggestions. Your current list is kept as SuperSubtitler_SRTCleaner.txt.bak.",
+    "Restore list");
+  if (!ok) return;
+  const note = $("cleaner-note");
+  try {
+    const v = await App().ResetCleaner();
+    $("cleaner-text").value = v.text || "";
+    note.className = "note ok";
+    note.textContent = "Standard list restored (the previous one is SuperSubtitler_SRTCleaner.txt.bak).";
+  } catch (e) {
+    note.className = "note bad";
+    note.textContent = errText(e);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // About
 // ---------------------------------------------------------------------------
@@ -1112,6 +1286,7 @@ async function init() {
   syncOptionUI();
   renderSubList();
   renderMerge();
+  renderSplit();
 
   document.querySelectorAll(".nav-item").forEach((b) => { b.onclick = () => showPage(b.dataset.page); });
   $("theme-dark").onclick = () => setTheme("dark");
@@ -1125,11 +1300,19 @@ async function init() {
   $("merge-add-files").onclick = () => pick("files", "merge");
   $("merge-clear").onclick = () => { state.mergeItems = []; if (state.model && state.model.kind === "merge") state.model = null; $("merge-bar").firstElementChild.style.width = "0"; renderMerge(); };
   $("merge-start").onclick = startMerge;
-  ["sub-list", "merge-list"].forEach((id) => {
-    $(id).addEventListener("wheel", () => { lastUserScroll[id === "merge-list" ? "merge" : "subtitle"] = Date.now(); }, { passive: true });
+  $("split-add-files").onclick = () => pick("files", "split");
+  $("split-add-folder").onclick = () => pick("folder", "split");
+  $("split-clear").onclick = () => { state.splitItems = []; if (state.model && state.model.kind === "split") state.model = null; $("split-bar").firstElementChild.style.width = "0"; $("split-status").textContent = "Add the files whose channels you want to hear separately."; renderSplit(); };
+  $("split-start").onclick = startSplit;
+  $("split-stop").onclick = stopRun;
+  $("opt-reset").onclick = resetOptions;
+  $("settings-defaults").onclick = restoreSettingsDefaults;
+  $("cleaner-defaults").onclick = restoreCleanerDefaults;
+  [["sub-list", "subtitle"], ["merge-list", "merge"], ["split-list", "split"]].forEach(([id, page]) => {
+    $(id).addEventListener("wheel", () => { lastUserScroll[page] = Date.now(); }, { passive: true });
   });
 
-  optionIds.concat(["opt-lang", "opt-lang-other"]).forEach((id) => {
+  optionIds.concat(["opt-lang", "opt-lang-other", "opt-channel"]).forEach((id) => {
     $(id).addEventListener("change", () => { syncOptionUI(); saveOptions(); });
   });
   $("opt-outmode").addEventListener("change", async () => {
@@ -1154,15 +1337,15 @@ async function init() {
   window.runtime.EventsOn("run:log", (line) => addLog(line.text));
   window.runtime.EventsOn("run:state", onState);
 
-  // Drops anywhere in the window go to the page that is open (Merge or
-  // Subtitle); on Settings/About they go to Subtitle.
+  // Drops anywhere in the window go to the page that is open (Merge, Split
+  // or Subtitle); on Settings/About they go to Subtitle.
   window.runtime.OnFileDrop((x, y, paths) => {
-    const page = state.page === "merge" ? "merge" : "subtitle";
+    const page = state.page === "merge" || state.page === "split" ? state.page : "subtitle";
     if (state.running) { toast("Wait until the current run is finished, then add more.", true); return; }
     if (page === "subtitle" && state.page !== "subtitle") showPage("subtitle");
     addPaths(paths, page);
   }, false);
-  ["sub-list", "merge-list"].forEach((id) => {
+  ["sub-list", "merge-list", "split-list"].forEach((id) => {
     const el = $(id);
     el.addEventListener("dragenter", () => el.classList.add("dragover"));
     el.addEventListener("dragleave", () => el.classList.remove("dragover"));
@@ -1185,9 +1368,13 @@ async function init() {
 }
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !$("dialog").hidden) {
+  if (e.key !== "Escape" || $("dialog").hidden) return;
+  if (state.dialogKind === "question") {
     // Escape takes the CLI's default — never leaves the CLI waiting forever.
     answer("");
+  } else {
+    const no = $("c-no");
+    if (no) no.click();
   }
 });
 

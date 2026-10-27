@@ -69,6 +69,31 @@ func TestSubtitleArgs(t *testing.T) {
 	}
 }
 
+func TestChannelAndSplitArgs(t *testing.T) {
+	args, err := SubtitleArgs(RunOptions{Channel: " 2 "})
+	if err != nil || args[len(args)-1] != "-channel:2" {
+		t.Errorf("channel 2: %q, %v", args, err)
+	}
+	args, _ = SubtitleArgs(RunOptions{Channel: "0"})
+	if args[len(args)-1] != "-channel:0" {
+		t.Errorf("channel 0 must be passed on, not treated as automatic: %q", args)
+	}
+	for _, bad := range []string{"-1", "x", "16"} {
+		if _, err := SubtitleArgs(RunOptions{Channel: bad}); err == nil {
+			t.Errorf("channel %q must be refused", bad)
+		}
+	}
+	if got, _ := SplitArgs(0); !reflect.DeepEqual(got, []string{"-json", "-nowait", "-split"}) {
+		t.Errorf("split = %q", got)
+	}
+	if got, _ := SplitArgs(2); !reflect.DeepEqual(got, []string{"-json", "-nowait", "-split", "-track:2"}) {
+		t.Errorf("split track 2 = %q", got)
+	}
+	if _, err := SplitArgs(-1); err == nil {
+		t.Error("negative track must be refused")
+	}
+}
+
 func TestMergeAndSetupArgs(t *testing.T) {
 	if _, err := MergeArgs("", "", []string{"a.m4a"}); err == nil {
 		t.Error("merge without a video must be refused")

@@ -34,11 +34,17 @@ Every decision about a file (language, timing, layout) stays in the CLI.
   when the batch is done.
 - 🧩 **Merge page** — one video plus audio/subtitle files → `.joined.mkv`,
   lossless.
+- 🔊 **Split page** — the voice gets lost? Every channel of an audio track
+  becomes its own WAV (`Movie.ch02.wav` …) to listen to; then pick that channel
+  under **Audio channel** on the Subtitle page (`-split` / `-channel:N`).
 - ⚙️ **Settings page** built from `SuperSubtitler_Config.ini` itself, with the
   file's own explanations. Before saving, the CLI checks the values
   (`-checkconfig`): a value it would refuse is never written, so the file can
   no longer be reset to defaults by one typo. The previous file stays as `.bak`.
   The subtitle cleaner's term list is editable there too.
+  **Restore defaults** brings back SuperSubtitler's standard settings (or the
+  standard cleaner list) — written by the CLI itself, your old file kept as
+  `.bak`. The Subtitle page's own options have a **Reset** button.
 - ✋ **Stop** — the same clean stop as Ctrl+C in the console; press twice to quit
   at once.
 - 🌗 Dark and light theme, remembered size and place, one window at a time.

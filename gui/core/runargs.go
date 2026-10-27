@@ -2,7 +2,9 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +20,25 @@ type RunOptions struct {
 	Auto      bool   `json:"auto"`
 	Force     bool   `json:"force"`
 	OutDir    string `json:"outDir"` // "" = next to the source
+	// Channel is the physical channel to isolate ("0", "2", …), "" = the
+	// automatic voice-focused downmix. A string on purpose: an int would make
+	// a missing value mean "channel 0" instead of "automatic".
+	Channel string `json:"channel"`
+}
+
+// maxChannel covers 7.1 with room to spare; ffmpeg rejects what is not there.
+const maxChannel = 15
+
+func channelArg(ch string) (string, error) {
+	ch = strings.TrimSpace(ch)
+	if ch == "" {
+		return "", nil
+	}
+	n, err := strconv.Atoi(ch)
+	if err != nil || n < 0 || n > maxChannel {
+		return "", fmt.Errorf("audio channel must be a number from 0 to %d", maxChannel)
+	}
+	return "-channel:" + strconv.Itoa(n), nil
 }
 
 var langCode = regexp.MustCompile(`^[a-z]{2,3}$`)
@@ -51,8 +72,29 @@ func SubtitleArgs(o RunOptions) ([]string, error) {
 			args = append(args, f.flag)
 		}
 	}
+	ch, err := channelArg(o.Channel)
+	if err != nil {
+		return nil, err
+	}
+	if ch != "" {
+		args = append(args, ch)
+	}
 	if o.OutDir != "" {
 		args = append(args, "-out:"+o.OutDir)
+	}
+	return args, nil
+}
+
+// SplitArgs builds the flags of a channel export (-split): every physical
+// channel of the chosen audio track becomes "<name>.chNN.wav" next to the
+// source, so the speech can be found by ear. track is 1-based; 0 = first.
+func SplitArgs(track int) ([]string, error) {
+	if track < 0 || track > 99 {
+		return nil, errors.New("audio track must be a number from 1 to 99")
+	}
+	args := append(append([]string{}, baseArgs...), "-split")
+	if track > 0 {
+		args = append(args, "-track:"+strconv.Itoa(track))
 	}
 	return args, nil
 }

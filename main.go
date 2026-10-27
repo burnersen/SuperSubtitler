@@ -597,7 +597,9 @@ func collectInputFiles(cfg *AppConfig, args []string) ([]string, []skippedInput)
 			skipped = append(skipped, skippedInput{path, skipOwnOutput}) // never re-feed
 			return
 		}
-		if !cfg.force && hasExistingSubs(outputBase(cfg, path)) {
+		// Existing subtitles only matter when subtitling; a channel export
+		// (-split) of an already subtitled film is a perfectly normal request.
+		if !cfg.force && !cfg.split && hasExistingSubs(outputBase(cfg, path)) {
 			skipped = append(skipped, skippedInput{path, skipHasSubs})
 			return
 		}

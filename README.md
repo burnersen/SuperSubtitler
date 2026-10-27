@@ -53,7 +53,7 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 
 ## 🖥️ Prefer a window?
 
-**SuperSubtitlerGUI** (in [`gui/`](gui/README.md)) puts all of this behind buttons: drag and drop, tick boxes for audio tracks, one-click language questions, live progress per file and on the taskbar, a Merge page, and a Settings page built from the config file itself. It drives the unchanged `SuperSubtitler.exe` — same engine, same results.
+**SuperSubtitlerGUI** (in [`gui/`](gui/README.md)) puts all of this behind buttons: drag and drop, tick boxes for audio tracks, one-click language questions, live progress per file and on the taskbar, Merge and Split pages, and a Settings page built from the config file itself (with "Restore defaults"). It drives the unchanged `SuperSubtitler.exe` — same engine, same results.
 
 ---
 

@@ -233,6 +233,26 @@ func (a *App) StartSubtitle(opts core.RunOptions, files []string) error {
 		RunState{Kind: "subtitle", Batch: 1, Batches: len(batches)})
 }
 
+// StartSplit exports every channel of the chosen track as a WAV (-split).
+func (a *App) StartSplit(track int, files []string) error {
+	if len(files) == 0 {
+		return errors.New("add some files first")
+	}
+	if err := a.readyCLI(); err != nil {
+		return err
+	}
+	flags, err := core.SplitArgs(track)
+	if err != nil {
+		return err
+	}
+	batches := core.Batches(flags, files, core.MaxCommandLine)
+	a.mu.Lock()
+	a.flags, a.pending = flags, batches[1:]
+	a.mu.Unlock()
+	return a.runner.Start(cliPath(), guiDir(), append(append([]string{}, flags...), batches[0]...),
+		RunState{Kind: "split", Batch: 1, Batches: len(batches)})
+}
+
 func (a *App) StartMerge(outDir, video string, extras []string) error {
 	if err := a.readyCLI(); err != nil {
 		return err
@@ -396,6 +416,48 @@ func (a *App) GetCleaner() CleanerView {
 		v.Exists, v.Text = true, string(raw)
 	}
 	return v
+}
+
+// ResetSettings restores SuperSubtitler_Config.ini to the CLI's documented
+// defaults: the current file is kept as .bak, and the CLI writes a fresh one
+// (it creates the file whenever it is missing). The window itself never
+// writes default values, so they can never drift from the CLI's.
+func (a *App) ResetSettings() (SettingsView, error) {
+	if err := a.restoreDefaultFile(cliConfigName); err != nil {
+		return a.GetSettings(), err
+	}
+	return a.GetSettings(), nil
+}
+
+// ResetCleaner does the same for the SRT cleaner's term list.
+func (a *App) ResetCleaner() (CleanerView, error) {
+	if err := a.restoreDefaultFile(cliCleanerName); err != nil {
+		return a.GetCleaner(), err
+	}
+	return a.GetCleaner(), nil
+}
+
+func (a *App) restoreDefaultFile(name string) error {
+	if a.runner.Running() {
+		return errors.New("not while a run is in progress — it reads this file")
+	}
+	if !fileExists(cliPath()) {
+		return errors.New(cliFileName + " is needed to write the defaults, and it was not found")
+	}
+	path := filepath.Join(guiDir(), name)
+	if fileExists(path) {
+		_ = os.Remove(path + ".bak")
+		if err := os.Rename(path, path+".bak"); err != nil {
+			return errors.New("could not keep the current file as .bak: " + err.Error())
+		}
+	}
+	ensureCLIFiles()
+	if !fileExists(path) {
+		// Put the old file back rather than leave the user with none.
+		_ = os.Rename(path+".bak", path)
+		return errors.New(cliFileName + " did not write the default file")
+	}
+	return nil
 }
 
 func (a *App) SaveCleaner(text string) error {
