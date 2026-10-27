@@ -1,5 +1,9 @@
 //go:build windows && amd64
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 package main
 
 import (
@@ -38,7 +42,12 @@ LANGUAGE
 QUICK START
   Just drag files or a folder onto the EXE. Already-finished
   files (an existing .srt or .subbed.mkv) are skipped, so
-  running again is safe.
+  running again is safe (-force redoes them).
+
+  All questions (which audio tracks, which language when the
+  file's tag and the detection disagree) are asked right at
+  the start, before the long part begins - you can walk away
+  once the progress bars appear.
 
 OPTIONS
   -translate       Translate every track to English.
@@ -58,6 +67,21 @@ OPTIONS
   -split           Export every audio channel as a separate
                    WAV so you can listen and find where the
                    speech is; skips transcription.
+  -auto            Never ask anything: all audio tracks, the
+                   detected language, merge = yes.
+  -force           Redo files that already have subtitles
+                   (the old results are overwritten).
+  -out:FOLDER      Write the .srt/.mkv results into FOLDER
+                   instead of next to the source file.
+  -nowait          Do not wait for Enter at the end.
+  -setup           Download and install everything (including
+                   the speech models) and exit. Useful to get
+                   the one-time setup out of the way.
+  -nomerge         Never offer the merge mode; subtitle every
+                   dropped file.
+  -json            Machine-readable progress for front-ends
+                   (one JSON event per line on standard output).
+  -version         Print the version number and exit.
   -help            Show the banner and the full options list.
 
   Flags and files may be given in any order.
@@ -87,9 +111,11 @@ SUBTITLE CLEANER
   Nothing is hard-coded - you decide every term.
 
 FFMPEG
-  ffmpeg.exe and ffprobe.exe do all the audio/video work. If
-  they are missing, SuperSubtitler downloads them automatically.
-  You may also place them next to the EXE yourself.
+  ffmpeg.exe and ffprobe.exe do all the audio/video work.
+  SuperSubtitler downloads its own FFmpeg build (8.1.2, LGPL,
+  made from the official source) and checks it; an FFmpeg of another origin
+  next to the EXE is replaced by it once, so every install
+  works with the same FFmpeg.
 
 CONFIGURATION
   SuperSubtitler_Config.ini (next to the EXE, created on first
@@ -103,11 +129,20 @@ FIRST RUN
   the speech models (a few GB, once). They are cached next to
   the EXE; delete the Python\ folder to rebuild from scratch.
 
+  Everything is a fixed, tested set (exact versions, every
+  file checked against its SHA-256), fetched from the
+  project's own mirror (release runtime-v1 on GitHub)
+  first - the same for every user.
+
 REQUIREMENTS
   Windows 10/11 x64. An Nvidia GPU makes it much faster; without
   one it automatically falls back to the (slower) CPU.
 
   Press Ctrl+C to stop. Press it twice to exit immediately.
+
+EXIT CODES
+  0 = everything done, 1 = a file failed or setup failed,
+  2 = stopped before the batch was complete.
 `
 
 // writeHelpFileIfMissing creates the help file next to the executable when it is

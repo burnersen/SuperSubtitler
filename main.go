@@ -1,10 +1,13 @@
 //go:build windows && amd64
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 package main
 
 import (
 	"archive/zip"
-	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
@@ -26,7 +29,7 @@ import (
 
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
-const appVersion = "0.1.0"
+const appVersion = "0.2.0"
 
 // Embedded source archive, self-extracted into src/ on first run only. The
 // build step regenerates SuperSubtitler_src.zip from the .go sources.
@@ -66,8 +69,43 @@ func isAudioFile(path string) bool {
 	return audioExtensions[strings.ToLower(filepath.Ext(path))]
 }
 
+// Exit codes: 0 = everything done, 1 = at least one file failed or a fatal
+// error, 2 = stopped by the user before the batch was complete.
+const (
+	exitOK        = 0
+	exitFailed    = 1
+	exitCancelled = 2
+)
+
 func main() {
-	defer crashCatcher()
+	os.Exit(run())
+}
+
+func run() (code int) {
+	started := time.Now()
+	cfg := parseArgs(os.Args[1:])
+	if cfg.version {
+		fmt.Println(appVersion)
+		fmt.Println(runtimeSummary())
+		return exitOK
+	}
+	// -checkconfig:FILE validates an INI without changing anything, so a
+	// front-end can refuse a value that would make the next start reset it.
+	if cfg.checkConfig != "" {
+		if err := checkConfigFile(cfg.checkConfig); err != nil {
+			fmt.Println("invalid: " + err.Error())
+			return exitFailed
+		}
+		fmt.Println("ok")
+		return exitOK
+	}
+	// -json must switch the channels before the very first output line.
+	if cfg.json {
+		enableJSONMode()
+	}
+	noWait = cfg.noWait || cfg.json
+
+	defer crashCatcher(&code)
 
 	enableAnsiConsole()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -76,6 +114,9 @@ func main() {
 	setupConsoleCtrlHandler(cancel)
 
 	printHeader()
+	for _, f := range cfg.unknownFlags {
+		pWarn.Println("Ignoring unknown flag: " + f)
+	}
 
 	if err := initJobObject(); err != nil {
 		pWarn.Println("Job object unavailable — orphan-kill guarantee weakened: " + err.Error())
@@ -84,70 +125,135 @@ func main() {
 	loadOrCreateAppConfig()
 	activeCleaner = loadCleanerConfig()
 	_ = writeHelpFileIfMissing()
-
-	cfg := parseArgs(os.Args[1:])
 	lowMemActive = cfg.lowMem
 
-	if cfg.help || len(cfg.inputArgs) == 0 {
+	if cfg.help || (len(cfg.inputArgs) == 0 && !cfg.setup) {
 		printUsage()
 		waitForEnter()
-		return
+		return exitOK
+	}
+
+	fatal := func(mode string, err error) int {
+		pErr.Println(err.Error())
+		emitError(err.Error())
+		emitSummary(mode, 0, 0, 0, 0, started, false)
+		waitForEnter()
+		return exitFailed
+	}
+
+	if cfg.outDir != "" {
+		abs, err := filepath.Abs(cfg.outDir)
+		if err == nil {
+			err = os.MkdirAll(abs, 0755)
+		}
+		if err != nil {
+			return fatal("subtitle", fmt.Errorf("output folder %q is not usable: %w", cfg.outDir, err))
+		}
+		cfg.outDir = abs
+		pInfo.Println("Output folder: " + pterm.LightCyan(abs))
+	}
+
+	// -setup: install FFmpeg, Python, the engine and the models, then stop.
+	if cfg.setup {
+		emitRun("setup", 0, cfg)
+		if err := initTools(ctx, cfg, true); err != nil {
+			return fatal("setup", err)
+		}
+		selfExtractSource()
+		pOK.Println("Setup complete — SuperSubtitler is ready to use.")
+		emitSummary("setup", 0, 0, 0, 0, started, false)
+		waitForEnter()
+		return exitOK
 	}
 
 	printQuickTips()
 
-	if err := initTools(ctx); err != nil {
-		pErr.Println(err.Error())
-		waitForEnter()
-		return
-	}
-
-	selfExtractSource()
-
 	// Auto-detect a merge job (1 video + dropped audio/subtitle files) and offer
 	// to mux them into one file, before falling through to normal subtitling.
-	if !cfg.split {
+	// Merging needs FFmpeg only, so it never waits for the Python setup.
+	if !cfg.split && !cfg.noMerge {
 		if video, audios, subs, ok := classifyMergeInputs(cfg.inputArgs); ok {
-			if askMerge(video, audios, subs) {
-				runMergeMode(ctx, video, audios, subs)
+			if askMerge(video, audios, subs, cfg.auto) {
+				emitRun("merge", 1, cfg)
+				if err := initTools(ctx, cfg, false); err != nil {
+					return fatal("merge", err)
+				}
+				ok := runMergeMode(ctx, cfg, video, audios, subs)
+				success, failed := 1, 0
+				if !ok {
+					success, failed = 0, 1
+				}
+				emitSummary("merge", 1, success, 0, failed, started, ctx.Err() != nil)
 				waitForEnter()
-				return
+				return exitCode(failed, ctx.Err() != nil)
 			}
 		}
 	}
 
-	files, skipped := collectInputFiles(cfg.inputArgs)
-	if skipped > 0 {
-		pInfo.Printf("Skipped %d file(s) that already have subtitles or are tool output.\n", skipped)
+	mode := "subtitle"
+	if cfg.split {
+		mode = "split"
+	}
+	files, skipped := collectInputFiles(cfg, cfg.inputArgs)
+	emitRun(mode, len(files), cfg)
+	for _, sk := range skipped {
+		emitSkip(sk.path, sk.reason)
+	}
+	if n := countReason(skipped, skipHasSubs); n > 0 {
+		pInfo.Printf("Skipped %d file(s) that already have subtitles (use -force to redo them).\n", n)
 	}
 	if len(files) == 0 {
 		pWarn.Println("No processable video/audio files. Drag files or folders onto the EXE.")
+		emitSummary(mode, 0, 0, len(skipped), 0, started, false)
 		waitForEnter()
-		return
+		return exitOK
 	}
 	pInfo.Printf("Queued %d file(s).\n", len(files))
 
+	if err := initTools(ctx, cfg, !cfg.split); err != nil {
+		return fatal(mode, err)
+	}
+	selfExtractSource()
+
 	if cfg.split {
-		runDiagnosticMode(ctx, cfg, files)
+		success, failed := runDiagnosticMode(ctx, cfg, files)
+		emitSummary(mode, len(files), success, len(skipped), failed, started, ctx.Err() != nil)
 		waitForEnter()
-		return
+		return exitCode(failed, ctx.Err() != nil)
 	}
 
 	jobs := buildFileJobs(ctx, cfg, files)
+	defer cleanupJobs(jobs)
+	analyzeJobs(ctx, cfg, jobs)
 	results := runPipeline(ctx, cfg, jobs)
-	printSummary(results, ctx.Err() != nil)
+	cancelled := ctx.Err() != nil
+	success, failed := printSummary(results, cancelled)
+	emitSummary(mode, len(jobs), success, len(skipped), failed, started, cancelled)
 	waitForEnter()
+	return exitCode(failed, cancelled)
+}
+
+func exitCode(failed int, cancelled bool) int {
+	switch {
+	case cancelled:
+		return exitCancelled
+	case failed > 0:
+		return exitFailed
+	}
+	return exitOK
 }
 
 // ----------------------------------------------------------------------------
 // Init
 // ----------------------------------------------------------------------------
 
-func crashCatcher() {
+func crashCatcher(code *int) {
 	if r := recover(); r != nil {
 		pErr.Printf("Unexpected error: %v\n", r)
 		fmt.Println(string(debug.Stack()))
+		emitError(fmt.Sprintf("unexpected error: %v", r))
 		waitForEnter()
+		*code = exitFailed
 	}
 }
 
@@ -184,6 +290,8 @@ func printQuickTips() {
 		y("• -lang:de <files>  ") + g("        >>  ") + "force the source language (skip detection)\n" +
 		y("• -track:N  /  -channel:N") + g("   >>  ") + "pick a specific audio track / channel\n" +
 		y("• -split <files>    ") + g("        >>  ") + "export each audio channel as WAV (find the speech)\n" +
+		y("• -auto  /  -force  ") + g("        >>  ") + "never ask / redo files that already have subtitles\n" +
+		y("• -out:<folder>     ") + g("        >>  ") + "write the results into another folder\n" +
 		y("• -srtonly · -lean · -lowmem · -novad") + g("   >>  ") + "see -help for all options\n\n" +
 		g("  language codes: de en es fr it pt nl ru pl tr ja ko zh ar …  (any ISO code)")
 	pterm.DefaultBox.WithTitle(pterm.LightCyan("  Quick start  ")).WithTitleTopCenter().Println(tips)
@@ -211,6 +319,14 @@ func printUsage() {
 		{pterm.LightCyan("-novad"), "Disable the voice-activity (silence) filter."},
 		{pterm.LightCyan("-lowmem"), "Smaller compute type (less VRAM, slightly slower)."},
 		{pterm.LightCyan("-split"), "Export each audio channel as a WAV (to find the speech); skip transcription."},
+		{pterm.LightCyan("-auto"), "Never ask: all tracks, detected language, merge = yes."},
+		{pterm.LightCyan("-force"), "Redo files that already have subtitles (overwrites the results)."},
+		{pterm.LightCyan("-out:DIR"), "Write .srt/.mkv results into DIR instead of next to the source."},
+		{pterm.LightCyan("-nowait"), "Do not wait for Enter at the end."},
+		{pterm.LightCyan("-setup"), "Download and install everything (incl. speech models), then exit."},
+		{pterm.LightCyan("-nomerge"), "Never offer the merge mode; subtitle every dropped file."},
+		{pterm.LightCyan("-json"), "Machine-readable events on stdout (for front-ends); implies -nowait."},
+		{pterm.LightCyan("-version"), "Print the version and exit."},
 		{pterm.LightCyan("-help"), "Show this help."},
 	}
 	_ = pterm.DefaultTable.WithData(rows).Render()
@@ -241,12 +357,20 @@ func etaSuffix(start time.Time, frac float64) string {
 	if frac <= 0.02 {
 		return ""
 	}
-	elapsed := time.Since(start).Seconds()
-	remain := elapsed * (1 - frac) / frac
-	if remain < 0 {
-		remain = 0
+	return pterm.Gray("  · ETA " + fmtDuration(time.Duration(etaSeconds(start, frac))*time.Second))
+}
+
+// etaSeconds estimates the remaining seconds from elapsed time and progress;
+// 0 while too little is known to say anything honest.
+func etaSeconds(start time.Time, frac float64) float64 {
+	if frac <= 0.02 {
+		return 0
 	}
-	return pterm.Gray("  · ETA " + fmtDuration(time.Duration(remain)*time.Second))
+	remain := time.Since(start).Seconds() * (1 - frac) / frac
+	if remain < 0 {
+		return 0
+	}
+	return remain
 }
 
 func fmtDuration(d time.Duration) string {
@@ -271,16 +395,27 @@ func exeDir() string {
 	return filepath.Dir(exe)
 }
 
-func initTools(ctx context.Context) error {
+// initTools makes sure FFmpeg is present and, when needWhisper is set, the
+// embedded Python, the engine and the speech models this run will use. Merge
+// and split need FFmpeg only and never wait for the (large) Python setup.
+func initTools(ctx context.Context, cfg *AppConfig, needWhisper bool) error {
 	dir := exeDir()
 	ffmpegPath = filepath.Join(dir, "ffmpeg.exe")
 	ffprobePath = filepath.Join(dir, "ffprobe.exe")
 
-	if !fileExists(ffmpegPath) || !fileExists(ffprobePath) {
-		pInfo.Println("FFmpeg not found next to the EXE — downloading once...")
-		if err := downloadFFmpeg(dir); err != nil {
+	if !ffmpegIsPinned(dir) {
+		if fileExists(ffmpegPath) {
+			pInfo.Println("Replacing FFmpeg with the tested build " + pins.FFmpeg.Version + " (one-time)...")
+		} else {
+			pInfo.Println("FFmpeg not found next to the EXE — downloading once...")
+		}
+		if err := downloadFFmpeg(ctx, dir); err != nil {
 			return err
 		}
+	}
+	if !needWhisper {
+		emitSetup("ready", "done", "", 0, 0, 0)
+		return nil
 	}
 
 	whisperDir := filepath.Join(dir, "whisper")
@@ -295,7 +430,35 @@ func initTools(ctx context.Context) error {
 	if err := ensurePython(ctx, pythonDir); err != nil {
 		return err
 	}
+	if err := ensureModels(ctx, modelsNeeded(cfg)); err != nil {
+		return err
+	}
+	emitSetup("ready", "done", "", 0, 0, 0)
 	return nil
+}
+
+// modelsNeeded lists the speech models a run will load, de-duplicated, so they
+// can be fetched up front with visible progress instead of silently inside the
+// first transcription.
+func modelsNeeded(cfg *AppConfig) []string {
+	var list []string
+	add := func(m string) {
+		for _, x := range list {
+			if x == m {
+				return
+			}
+		}
+		list = append(list, m)
+	}
+	if cfg.forcedLang == "" || cfg.setup {
+		add(appSettings.detectModel)
+	}
+	if cfg.translate {
+		add(appSettings.modelTranslate)
+	} else {
+		add(appSettings.modelTranscribe)
+	}
+	return list
 }
 
 // ----------------------------------------------------------------------------
@@ -356,6 +519,8 @@ func parseArgs(argv []string) *AppConfig {
 			cfg.forcedChannel = atoiDefault(a[len("-channel:"):], -1)
 		case strings.HasPrefix(low, "-lang:"):
 			cfg.forcedLang = a[len("-lang:"):]
+		case strings.HasPrefix(low, "-out:"):
+			cfg.outDir = strings.Trim(a[len("-out:"):], `"`)
 		case low == "-translate" || low == "-en":
 			cfg.translate = true
 		case low == "-split" || low == "-diag":
@@ -368,10 +533,26 @@ func parseArgs(argv []string) *AppConfig {
 			cfg.noVad = true
 		case low == "-lowmem":
 			cfg.lowMem = true
+		case low == "-auto" || low == "-yes":
+			cfg.auto = true
+		case low == "-force":
+			cfg.force = true
+		case low == "-nowait":
+			cfg.noWait = true
+		case low == "-json":
+			cfg.json = true
+		case low == "-setup":
+			cfg.setup = true
+		case low == "-nomerge":
+			cfg.noMerge = true
+		case strings.HasPrefix(low, "-checkconfig:"):
+			cfg.checkConfig = strings.Trim(a[len("-checkconfig:"):], `"`)
+		case low == "-version" || low == "--version":
+			cfg.version = true
 		case low == "-help" || low == "-h" || low == "-?" || low == "--help":
 			cfg.help = true
 		case strings.HasPrefix(a, "-"):
-			pWarn.Println("Ignoring unknown flag: " + a)
+			cfg.unknownFlags = append(cfg.unknownFlags, a)
 		default:
 			cfg.inputArgs = append(cfg.inputArgs, a)
 		}
@@ -390,21 +571,45 @@ func atoiDefault(s string, def int) int {
 // File collection + skip rules
 // ----------------------------------------------------------------------------
 
-func collectInputFiles(args []string) ([]string, int) {
+// skipped input reasons (also the "reason" of the JSON skip event).
+const (
+	skipHasSubs   = "has_subs"
+	skipOwnOutput = "own_output"
+)
+
+type skippedInput struct {
+	path   string
+	reason string
+}
+
+func countReason(list []skippedInput, reason string) int {
+	n := 0
+	for _, s := range list {
+		if s.reason == reason {
+			n++
+		}
+	}
+	return n
+}
+
+func collectInputFiles(cfg *AppConfig, args []string) ([]string, []skippedInput) {
 	seen := map[string]bool{}
 	var files []string
-	skipped := 0
+	var skipped []skippedInput
 
 	consider := func(path string) {
 		ext := strings.ToLower(filepath.Ext(path))
 		if !videoExtensions[ext] && !audioExtensions[ext] {
 			return
 		}
-		if strings.HasSuffix(strings.ToLower(path), ".subbed.mkv") {
-			return // our own output, never re-feed
+		if isOwnOutput(path) {
+			skipped = append(skipped, skippedInput{path, skipOwnOutput}) // never re-feed
+			return
 		}
-		if hasExistingSubs(path) {
-			skipped++
+		// Existing subtitles only matter when subtitling; a channel export
+		// (-split) of an already subtitled film is a perfectly normal request.
+		if !cfg.force && !cfg.split && hasExistingSubs(outputBase(cfg, path)) {
+			skipped = append(skipped, skippedInput{path, skipHasSubs})
 			return
 		}
 		long := getLongPathName(path)
@@ -437,17 +642,56 @@ func collectInputFiles(args []string) ([]string, int) {
 	return files, skipped
 }
 
+// isOwnOutput reports files this tool wrote itself (.subbed.mkv, .joined.mkv),
+// which must never be fed back in as input.
+func isOwnOutput(path string) bool {
+	low := strings.ToLower(filepath.Base(path))
+	if strings.HasSuffix(low, ".subbed.mkv") {
+		return true
+	}
+	// "<name>.joined.mkv" or numbered "<name>.joined.2.mkv"
+	stem := strings.TrimSuffix(low, ".mkv")
+	if i := strings.LastIndex(stem, ".joined"); i >= 0 {
+		rest := stem[i+len(".joined"):]
+		if rest == "" {
+			return true
+		}
+		if rest[0] == '.' {
+			if _, err := strconv.Atoi(rest[1:]); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// outputBase is the path stem every result of src is named after: next to the
+// source by default, or inside the -out folder.
+func outputBase(cfg *AppConfig, src string) string {
+	stem := strings.TrimSuffix(src, filepath.Ext(src))
+	if cfg.outDir == "" {
+		return stem
+	}
+	return filepath.Join(cfg.outDir, filepath.Base(stem))
+}
+
 // hasExistingSubs reports whether a sidecar .srt or a .subbed.mkv already exists
-// for this video, so a re-scan skips finished work.
-func hasExistingSubs(path string) bool {
-	base := strings.TrimSuffix(path, filepath.Ext(path))
+// for this output stem, so a re-scan skips finished work.
+func hasExistingSubs(base string) bool {
 	if fileExists(base + ".subbed.mkv") {
 		return true
 	}
-	if m, _ := filepath.Glob(base + ".*.srt"); len(m) > 0 {
+	if m, _ := filepath.Glob(globEscape(base) + ".*.srt"); len(m) > 0 {
 		return true
 	}
 	return false
+}
+
+// globEscape protects glob metacharacters in a literal path ("Movie [1080p]"
+// would otherwise be read as a character class and never match).
+func globEscape(p string) string {
+	r := strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]")
+	return r.Replace(p)
 }
 
 func fileExists(p string) bool {
@@ -480,6 +724,7 @@ type trackJob struct {
 	stream    probeStream
 	ordinal   int // 0-based index among the file's audio streams (for -map 0:a:N)
 	detChunks []string
+	detected  string // detection vote, "" when skipped (-lang) or inconclusive
 	mainWav   string
 	plan      langPlan
 	wj        *whisperJSON
@@ -517,28 +762,224 @@ func buildFileJobs(ctx context.Context, cfg *AppConfig, files []string) []*fileJ
 			break
 		}
 		job := &fileJob{index: i, src: f}
+		jobs = append(jobs, job)
+		emitStage(i+1, 0, "probe")
 		pd, err := probeFile(ctx, f)
 		if err != nil {
 			job.fail(err)
-			jobs = append(jobs, job)
+			emitFile(job, len(files))
 			continue
 		}
 		job.duration = pd.durationSec()
 		if len(pd.audioStreams()) > 1 && cfg.forcedTrack <= 0 {
 			pInfo.Printf("%s\n", job.label()) // context for the upcoming question
 		}
-		sels, err := selectTracks(cfg, pd)
+		sels, err := selectTracks(cfg, pd, f)
 		if err != nil {
 			job.fail(err)
-			jobs = append(jobs, job)
+			emitFile(job, len(files))
 			continue
 		}
 		for _, s := range sels {
 			job.tracks = append(job.tracks, &trackJob{stream: s.stream, ordinal: s.ordinal})
 		}
-		jobs = append(jobs, job)
+		emitFile(job, len(files))
 	}
 	return jobs
+}
+
+// cleanupJobs removes every work folder that is still around — a cancelled
+// batch never reaches finalizeStage for the files it did not start.
+func cleanupJobs(jobs []*fileJob) {
+	for _, j := range jobs {
+		if j.work != "" {
+			_ = os.RemoveAll(j.work)
+			j.work = ""
+		}
+	}
+}
+
+// analyzeJobs settles the language of every selected track BEFORE the long
+// unattended part begins, so every question (language mismatch, unknown
+// language) is asked while the user is still at the screen — never at file 7
+// in the middle of the night.
+//
+// Detection samples of all tracks are extracted first and then detected in ONE
+// engine call, so the detection model loads once for the whole batch instead
+// of once per file. If that shared call fails, each track is retried on its own
+// so one broken file cannot take the others' detection down with it.
+func analyzeJobs(ctx context.Context, cfg *AppConfig, jobs []*fileJob) {
+	type pending struct {
+		job   *fileJob
+		track int
+		t     *trackJob
+	}
+	var todo []pending
+	var allChunks []string
+
+	detDir := ""
+	if cfg.forcedLang == "" {
+		d, err := os.MkdirTemp("", "subs-detect-*")
+		if err != nil {
+			pErr.Println("Cannot create a temp folder for language detection: " + err.Error())
+		} else {
+			detDir = d
+			defer os.RemoveAll(detDir)
+		}
+	}
+
+	for _, job := range jobs {
+		if job.err != nil {
+			continue
+		}
+		if ctx.Err() != nil {
+			job.fail(ctx.Err())
+			continue
+		}
+		work, err := os.MkdirTemp("", "subs-*")
+		if err != nil {
+			job.fail(fmt.Errorf("create work dir: %w", err))
+			continue
+		}
+		job.work = work
+		if cfg.forcedLang != "" || detDir == "" {
+			continue
+		}
+		for i, t := range job.tracks {
+			emitStage(job.index+1, i+1, "detect")
+			prefix := fmt.Sprintf("j%03dt%02d_", job.index, i)
+			chunks, err := extractDetectionChunks(ctx, cfg, job.src, t.stream, t.ordinal, job.duration, detDir, prefix)
+			if err != nil {
+				t.err = err
+				continue
+			}
+			t.detChunks = chunks
+			allChunks = append(allChunks, chunks...)
+			todo = append(todo, pending{job, i, t})
+		}
+	}
+
+	if len(allChunks) > 0 && ctx.Err() == nil {
+		outDir := filepath.Join(detDir, "out")
+		spinner, _ := pterm.DefaultSpinner.WithText(fmt.Sprintf("Detecting the spoken language of %d track(s)...", len(todo))).Start()
+		done := 0
+		onLine := func(line string) {
+			if strings.HasPrefix(line, "@DONE ") {
+				done++
+				if spinner != nil {
+					spinner.UpdateText(fmt.Sprintf("Detecting the spoken language... (%d/%d samples)", done, len(allChunks)))
+				}
+			}
+		}
+		votes, err := detectLanguages(ctx, allChunks, outDir, onLine)
+		if err != nil && ctx.Err() == nil && len(todo) > 1 {
+			pWarn.Println("Shared language detection failed — retrying file by file: " + shortErr(err))
+			votes = map[string]string{}
+			for _, p := range todo {
+				v, perr := detectLanguages(ctx, p.t.detChunks, filepath.Join(outDir, fmt.Sprintf("r%03d_%02d", p.job.index, p.track)), nil)
+				if perr != nil {
+					p.t.err = perr
+					continue
+				}
+				for k, l := range v {
+					votes[k] = l
+				}
+			}
+			err = nil
+		}
+		if spinner != nil {
+			_ = spinner.Stop()
+		}
+		for _, p := range todo {
+			if err != nil {
+				p.t.err = err
+				continue
+			}
+			p.t.detected = voteForChunks(votes, p.t.detChunks)
+		}
+	}
+
+	// Resolve the plan of every track — this is where questions may come up.
+	for _, job := range jobs {
+		if job.err != nil {
+			continue
+		}
+		if ctx.Err() != nil {
+			job.fail(ctx.Err())
+			continue
+		}
+		for i, t := range job.tracks {
+			if t.err != nil {
+				continue
+			}
+			tag := containerLang(t.stream)
+			if willAskLanguage(cfg, tag, t.detected) {
+				pInfo.Printf("%s\n", trackLabelFor(job, i)) // context for the upcoming question
+			}
+			src := decideLanguage(cfg, tag, t.detected, job.src)
+			t.plan = buildPlan(cfg, src)
+			t.outLang = t.plan.outLang
+			emitEvent(eventLang{
+				Ev: "lang", Index: job.index + 1, Track: i + 1,
+				Detected: t.detected, Tag: tag, Src: t.plan.srcLang, Out: t.plan.outLang,
+				Task: t.plan.task, Model: t.plan.model,
+			})
+			pInfo.Printf("%s — %s\n", trackLabelFor(job, i), describePlan(t, tag))
+		}
+		if aliveTracks(job) == 0 {
+			job.fail(firstTrackErr(job, "language detection failed for all tracks"))
+		}
+	}
+}
+
+// willAskLanguage mirrors decideLanguage: true when it is going to ask.
+func willAskLanguage(cfg *AppConfig, tag, detected string) bool {
+	if cfg.forcedLang != "" || cfg.auto || cfg.translate {
+		return false
+	}
+	tag, detected = normalizeLang(tag), normalizeLang(detected)
+	return (tag != "" && detected != "" && tag != detected) || (tag == "" && detected == "")
+}
+
+// trackLabelFor names a file, or one of its tracks when it has several.
+func trackLabelFor(job *fileJob, i int) string {
+	if len(job.tracks) > 1 {
+		return fmt.Sprintf("%s (track %d/%d)", job.label(), i+1, len(job.tracks))
+	}
+	return job.label()
+}
+
+// describePlan renders the resolved language decision in one short line.
+func describePlan(t *trackJob, tag string) string {
+	var how []string
+	if t.detected != "" {
+		how = append(how, "detected "+t.detected)
+	}
+	if tag != "" {
+		how = append(how, "tag "+tag)
+	}
+	line := "language: " + t.plan.outLang
+	if t.plan.task == "translate" {
+		src := t.plan.srcLang
+		if src == "" {
+			src = "auto"
+		}
+		line = "translate " + src + " → en"
+	}
+	if len(how) > 0 {
+		line += pterm.Gray("  (" + strings.Join(how, ", ") + ")")
+	}
+	return line
+}
+
+func aliveTracks(job *fileJob) int {
+	n := 0
+	for _, t := range job.tracks {
+		if t.err == nil {
+			n++
+		}
+	}
+	return n
 }
 
 // firstTrackErr returns the first per-track error, or a fallback if none was set.
@@ -584,6 +1025,7 @@ func runPipeline(ctx context.Context, cfg *AppConfig, jobs []*fileJob) []*fileJo
 				defer recoverJob("finalize", job)
 				finalizeStage(ctx, cfg, job)
 			}()
+			emitResult(job)
 			mu.Lock()
 			results = append(results, job)
 			mu.Unlock()
@@ -605,32 +1047,27 @@ func runPipeline(ctx context.Context, cfg *AppConfig, jobs []*fileJob) []*fileJo
 
 func extractStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 	if job.err != nil {
-		return // already failed during probing/selection
+		return // already failed during probing/selection/analysis
 	}
 	if ctx.Err() != nil {
 		job.fail(ctx.Err())
 		return
 	}
-	work, err := os.MkdirTemp("", "subs-*")
-	if err != nil {
-		job.fail(fmt.Errorf("create work dir: %w", err))
-		return
-	}
-	job.work = work
-
 	alive := 0
 	for i, t := range job.tracks {
+		if t.err != nil {
+			continue
+		}
 		if ctx.Err() != nil {
 			job.fail(ctx.Err())
 			return
 		}
-		tdir := filepath.Join(work, fmt.Sprintf("t%d", i))
-		chunks, err := extractDetectionChunks(ctx, cfg, job.src, t.stream, t.ordinal, job.duration, filepath.Join(tdir, "det"))
-		if err != nil {
-			t.err = err
+		emitStage(job.index+1, i+1, "extract")
+		tdir := filepath.Join(job.work, fmt.Sprintf("t%d", i))
+		if err := os.MkdirAll(tdir, 0755); err != nil {
+			t.err = fmt.Errorf("create track dir: %w", err)
 			continue
 		}
-		t.detChunks = chunks
 		mainWav := filepath.Join(tdir, "main.wav")
 		if err := extractMainWAV(ctx, cfg, job.src, t.stream, t.ordinal, mainWav); err != nil {
 			t.err = err
@@ -651,30 +1088,17 @@ func gpuStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 		}
 		return
 	}
-	multi := len(job.tracks) > 1
 	for i, t := range job.tracks {
 		if t.err != nil || t.mainWav == "" {
-			continue // extraction already failed for this track
+			continue // analysis or extraction already failed for this track
 		}
 		if ctx.Err() != nil {
 			job.fail(ctx.Err())
 			return
 		}
 		tdir := filepath.Join(job.work, fmt.Sprintf("t%d", i))
-		tlabel := job.label()
-		if multi {
-			tlabel = fmt.Sprintf("%s (track %d/%d)", job.label(), i+1, len(job.tracks))
-		}
-
-		pInfo.Printf("%s — detecting language...\n", tlabel)
-		detected, err := detectLanguage(ctx, t.detChunks, filepath.Join(tdir, "detout"))
-		if err != nil {
-			t.err = err
-			continue
-		}
-		src := decideLanguage(cfg, containerLang(t.stream), detected)
-		t.plan = buildPlan(cfg, src)
-		t.outLang = t.plan.outLang
+		tlabel := trackLabelFor(job, i)
+		emitStage(job.index+1, i+1, "transcribe")
 
 		pInfo.Printf("%s — %s with %s (out: %s)...\n",
 			tlabel, t.plan.task, t.plan.model, t.plan.outLang)
@@ -688,9 +1112,20 @@ func gpuStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 			WithTitle(tlabel + " transcribing").
 			Start()
 		started := time.Now()
+		lastEmit := -1.0
 		onLine := func(line string) {
 			f, ok := parseProgress(line)
-			if !ok || bar == nil {
+			if !ok {
+				return
+			}
+			if f-lastEmit >= 0.002 || f >= 1 {
+				lastEmit = f
+				emitEvent(eventProgress{
+					Ev: "progress", Index: job.index + 1, Track: i + 1, Tracks: len(job.tracks),
+					Pct: f, ETASec: etaSeconds(started, f),
+				})
+			}
+			if bar == nil {
 				return
 			}
 			target := int(f * 1000)
@@ -726,7 +1161,7 @@ func finalizeStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 		return
 	}
 	leadinSec := float64(appSettings.leadinMs) / 1000.0
-	base := strings.TrimSuffix(job.src, filepath.Ext(job.src))
+	base := outputBase(cfg, job.src)
 	usedSRT := map[string]bool{}
 
 	var subs []subInput
@@ -765,6 +1200,7 @@ func finalizeStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 		return
 	}
 	job.outPath = base + ".subbed.mkv"
+	emitStage(job.index+1, 0, "mux")
 	if err := buildMKV(ctx, cfg, job.src, subs, audioOrdinals, job.outPath); err != nil {
 		job.fail(err)
 		return
@@ -793,40 +1229,52 @@ func (j *fileJob) fail(err error) {
 // Diagnostic mode
 // ----------------------------------------------------------------------------
 
-func runDiagnosticMode(ctx context.Context, cfg *AppConfig, files []string) {
+func runDiagnosticMode(ctx context.Context, cfg *AppConfig, files []string) (success, failed int) {
 	for i, f := range files {
 		if ctx.Err() != nil {
 			return
 		}
+		emitEvent(eventFile{Ev: "file", Index: i + 1, Total: len(files), Name: baseName(f), Path: f})
+		emitStage(i+1, 0, "extract")
+		res := eventResult{Ev: "result", Index: i + 1, Name: baseName(f), Status: "failed"}
+		fail := func(err error) {
+			pErr.Println(err.Error())
+			res.Message = shortErr(err)
+			emitEvent(res)
+			failed++
+		}
 		pInfo.Printf("[%d] %s — splitting channels...\n", i+1, baseName(f))
 		pd, err := probeFile(ctx, f)
 		if err != nil {
-			pErr.Println(err.Error())
+			fail(err)
 			continue
 		}
 		stream, ordinal, err := pickAudioStream(cfg, pd)
 		if err != nil {
-			pErr.Println(err.Error())
+			fail(err)
 			continue
 		}
-		written, err := runDiagnostic(ctx, f, stream, ordinal)
+		written, err := runDiagnostic(ctx, f, outputBase(cfg, f), stream, ordinal)
 		if err != nil {
-			pErr.Println(err.Error())
+			fail(err)
 			continue
 		}
-		pOK.Printf("Wrote %d channel file(s) next to %s.\n", len(written), baseName(f))
+		pOK.Printf("Wrote %d channel file(s) for %s.\n", len(written), baseName(f))
 		for _, w := range written {
 			pterm.Println(pterm.Gray("    " + baseName(w)))
 		}
+		res.Status, res.Outputs = "success", written
+		emitEvent(res)
+		success++
 	}
+	return
 }
 
 // ----------------------------------------------------------------------------
 // Summary
 // ----------------------------------------------------------------------------
 
-func printSummary(results []*fileJob, cancelled bool) {
-	ok, fail := 0, 0
+func printSummary(results []*fileJob, cancelled bool) (ok, fail int) {
 	for _, r := range results {
 		if r.status == "ok" {
 			ok++
@@ -847,14 +1295,21 @@ func printSummary(results []*fileJob, cancelled bool) {
 			pterm.Println(pterm.Red("  ERR ") + baseName(r.src) + pterm.Gray("  —  "+shortErr(r.err)))
 		}
 	}
+	return ok, fail
 }
 
 // ----------------------------------------------------------------------------
 // Exit
 // ----------------------------------------------------------------------------
 
+// noWait skips the final "Press Enter" (-nowait, and always with -json).
+var noWait bool
+
 func waitForEnter() {
+	if noWait {
+		return
+	}
 	pterm.Println()
 	pterm.Print(pterm.Gray("Press Enter to exit..."))
-	bufio.NewReader(os.Stdin).ReadString('\n')
+	_, _ = readAnswerLine()
 }

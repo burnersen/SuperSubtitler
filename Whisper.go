@@ -1,5 +1,9 @@
 //go:build windows && amd64
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 package main
 
 import (
@@ -151,14 +155,16 @@ func readWhisperJSON(path string) (*whisperJSON, error) {
 // Language detection (multi-segment majority vote)
 // ----------------------------------------------------------------------------
 
-// detectLanguage runs the detection model over all sample chunks in one engine
-// invocation (model loads once) and majority-votes the per-chunk language.
-func detectLanguage(ctx context.Context, chunks []string, outDir string) (string, error) {
+// detectLanguages runs the detection model over all sample chunks in one engine
+// invocation (the model loads once) and returns the language of every chunk
+// that produced a result, keyed by chunk path. onLine, when set, receives the
+// engine's "@DONE <name>" line after each chunk.
+func detectLanguages(ctx context.Context, chunks []string, outDir string, onLine func(string)) (map[string]string, error) {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return "", fmt.Errorf("Whisper.go: detectLanguage (mkdir): %w", err)
+		return nil, fmt.Errorf("Whisper.go: detectLanguages (mkdir): %w", err)
 	}
 	baseArgs := []string{
-		fModel, appSettings.detectModel,
+		fModel, modelArg(appSettings.detectModel),
 		fModelDir, modelDir,
 		fTask, "transcribe",
 		fOutputDir, outDir,
@@ -167,20 +173,31 @@ func detectLanguage(ctx context.Context, chunks []string, outDir string) (string
 		fBeamSize, "1",
 		fVadFilter, boolArg(true),
 	}
-	if err := runWhisper(ctx, baseArgs, chunks, nil); err != nil {
-		return "", fmt.Errorf("Whisper.go: detectLanguage: %w", err)
+	if err := runWhisper(ctx, baseArgs, chunks, onLine); err != nil {
+		return nil, fmt.Errorf("Whisper.go: detectLanguages: %w", err)
 	}
-	votes := map[string]int{}
+	langs := map[string]string{}
 	for _, c := range chunks {
 		wj, err := readWhisperJSON(outputJSONPath(outDir, c))
 		if err != nil {
 			continue
 		}
 		if l := normalizeLang(wj.Language); l != "" {
+			langs[c] = l
+		}
+	}
+	return langs, nil
+}
+
+// voteForChunks majority-votes the detected language over one track's chunks.
+func voteForChunks(langs map[string]string, chunks []string) string {
+	votes := map[string]int{}
+	for _, c := range chunks {
+		if l := langs[c]; l != "" {
 			votes[l]++
 		}
 	}
-	return topVote(votes), nil
+	return topVote(votes)
 }
 
 func topVote(votes map[string]int) string {
@@ -215,7 +232,7 @@ func transcribe(ctx context.Context, cfg *AppConfig, wavPath, model, task, lang,
 		return nil, fmt.Errorf("Whisper.go: transcribe (mkdir): %w", err)
 	}
 	baseArgs := []string{
-		fModel, model,
+		fModel, modelArg(model),
 		fModelDir, modelDir,
 		fTask, task,
 		fOutputDir, outDir,

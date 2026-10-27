@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
+# SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+# Copyright (C) 2026 burnersen
+# SPDX-License-Identifier: GPL-3.0-only
 """SuperSubtitler transcription driver.
 
 Invoked by the Go front-end as:
 
     python.exe transcribe.py [--flag value ...] WAV [WAV ...]
+    python.exe transcribe.py --prefetch --model_dir DIR MODEL [MODEL ...]
+
+The second form only downloads the models (one-time setup, so the download
+happens with visible progress instead of inside the first transcription) and
+prints "@MODELPATH <name><TAB><folder>" for each.
 
 It mirrors the flag set centralised in Whisper.go and writes, for every input
 WAV, an "<output_dir>/<basename>.json" file with exactly the shape the Go side
@@ -34,6 +42,39 @@ def _register_cuda_dlls():
             except OSError:
                 pass
             os.environ["PATH"] = b + os.pathsep + os.environ.get("PATH", "")
+
+
+def _patch_pyav_open():
+    """Keep faster-whisper working with PyAV 19 and newer.
+
+    faster-whisper (1.2.1 and older) decodes audio with
+    av.open(..., metadata_errors="ignore"), but allows any PyAV >= 11. PyAV 19
+    removed that keyword, so a fresh install picks up the newest PyAV and every
+    transcription dies with "open() got an unexpected keyword argument
+    'metadata_errors'". The keyword only tolerated broken metadata tags; our
+    input is a WAV this tool wrote itself, so dropping it changes nothing.
+    faster_whisper.audio looks av.open up at call time, so replacing the module
+    attribute is enough. Older PyAV keeps getting the keyword unchanged.
+    """
+    try:
+        import av
+    except ImportError:
+        return
+    original = av.open
+    if getattr(original, "_ss_compat", False):
+        return
+
+    def open_compat(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except TypeError as e:
+            if "metadata_errors" in kwargs and "metadata_errors" in str(e):
+                kwargs.pop("metadata_errors")
+                return original(*args, **kwargs)
+            raise
+
+    open_compat._ss_compat = True
+    av.open = open_compat
 
 
 def _bool(v):
@@ -119,9 +160,31 @@ def transcribe_one(model, args, wav):
     return {"language": info.language, "segments": seg_out}
 
 
+def prefetch():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--prefetch", action="store_true")
+    p.add_argument("--model_dir", default=None)
+    p.add_argument("models", nargs="+")
+    args = p.parse_args()
+    from faster_whisper.utils import download_model
+    for name in args.models:
+        if os.path.isdir(name):
+            path = name  # a local model folder: nothing to fetch
+        else:
+            # The same call WhisperModel() makes on load, so the files land
+            # exactly where the later transcription looks for them.
+            path = download_model(name, cache_dir=args.model_dir)
+        sys.stdout.write("@MODELPATH %s\t%s\n" % (name, path))
+        sys.stdout.flush()
+
+
 def main():
+    if "--prefetch" in sys.argv[1:]:
+        prefetch()
+        return
     args = parse_args()
     _register_cuda_dlls()
+    _patch_pyav_open()
     os.makedirs(args.output_dir, exist_ok=True)
     model = load_model(args)
     for wav in args.inputs:
@@ -130,6 +193,10 @@ def main():
         out_path = os.path.join(args.output_dir, base + ".json")
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False)
+        # One line per finished input: lets the Go side count a batched
+        # language detection and keeps its stall watchdog fed between inputs.
+        sys.stdout.write("@DONE %s\n" % base)
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":

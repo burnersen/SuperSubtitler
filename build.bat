@@ -20,7 +20,7 @@ set "EXE=..\SuperSubtitler.exe"
 
 echo [1/3] Packing source into %ZIP% ...
 if exist "%ZIP%" del /q "%ZIP%"
-powershell -NoProfile -Command "$inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py') -contains $_.Extension }; if ($inc) { Compress-Archive -Path $inc.FullName -DestinationPath '%ZIP%' -Force }"
+powershell -NoProfile -Command "$inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py','.json') -contains $_.Extension -or $_.Name -eq 'LICENSE' }; if ($inc) { Compress-Archive -Path $inc.FullName -DestinationPath '%ZIP%' -Force }"
 if not exist "%ZIP%" ( echo [ERROR] Could not create %ZIP%. & pause & exit /b 1 )
 
 echo [2/3] Resolving dependencies (go mod tidy) ...

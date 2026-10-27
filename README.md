@@ -5,6 +5,7 @@
 ### Drop a video, get clean subtitles back: automatic speech-to-subtitle, drag-and-drop.
 
 **Automatic subtitle generator with faster-whisper, for Windows. International, GPU-accelerated, one EXE.**
+*Free for everyone, at home or at work — open source under the [GPLv3](#-license).*
 Subtitles appear **only while someone is speaking** — no subtitles stuck on screen during silence.
 
 *Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and [FFmpeg](https://ffmpeg.org), which do the actual speech recognition and audio work. SuperSubtitler is the automation, language logic and safety layer around them.*
@@ -13,7 +14,7 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 [![GPU CUDA](https://img.shields.io/badge/GPU-CUDA%20%2B%20CPU%20fallback-76B900?logo=nvidia)](#-requirements)
 [![faster-whisper](https://img.shields.io/badge/engine-faster--whisper-blue)](https://github.com/SYSTRAN/faster-whisper)
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?logo=go)](#-building-from-source)
-[![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](#-license)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](#-license)
 
 **[⬇️ Download the latest release](https://github.com/burnersen/SuperSubtitler/releases/latest)** · **[🌐 Website](https://tech.burnersen.de/en/tools/supersubtitler-en/)** · **[☕ Buy me a coffee](https://ko-fi.com/T5G0219GA6)**
 
@@ -29,11 +30,11 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 
 ## ⚡ 30 seconds, no manual
 
-1. Download `SuperSubtitler.exe`, a single file with nothing to install.
+1. Download `SuperSubtitler.exe`, a single file with nothing to install — and, if you prefer a window, `SuperSubtitlerGUI.exe` into the same folder.
 2. Drag a video or audio file (or a whole folder) onto it.
 3. Done. You get a `Movie.<lang>.srt` next to it **and** a `Movie.subbed.mkv` with the subtitle track built in.
 
-On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a self-contained Python, the faster-whisper engine and the speech models — no installs, no PATH fiddling, no Python knowledge needed. After that, everything runs offline and locally; your audio never leaves your machine.
+On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a self-contained Python, the faster-whisper engine and the speech models — no installs, no PATH fiddling, no Python knowledge needed. Every download shows its progress (MB, speed); `-setup` does all of it in one go without processing a file. After that, everything runs offline and locally; your audio never leaves your machine.
 
 ---
 
@@ -51,12 +52,34 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 
 ---
 
+## 🖥️ Prefer a window?
+
+**SuperSubtitlerGUI** (in [`gui/`](gui/README.md)) puts all of this behind buttons: drag and drop, tick boxes for audio tracks, one-click language questions, live progress per file and on the taskbar, Merge and Split pages, and a Settings page built from the config file itself (with "Restore defaults"). It drives the unchanged `SuperSubtitler.exe` — same engine, same results.
+
+---
+
+## 📌 The same tested runtime for everyone
+
+A fresh install used to take the newest of everything — and one day a new PyAV release broke every new installation. Now SuperSubtitler installs one **tested set**, the same for every user, written into the EXE ([`runtime.json`](runtime.json)):
+
+- **Exact versions** of Python (3.12.10), pip, FFmpeg (8.1.2), faster-whisper, CTranslate2, PyAV, every other package and the CUDA libraries — pip installs them offline with `--require-hashes`, so nothing unlisted slips in.
+- **Speech models at an exact revision** (large-v3-turbo, large-v3).
+- **Every file is checked against its SHA-256** before it is used; a damaged or changed download is refused.
+- **Everything from the own mirror:** Python, pip, every Python package, FFmpeg and the speech models come from this project's [`runtime-v1` release](https://github.com/burnersen/SuperSubtitler/releases/tag/runtime-v1) first and only then from their original source — a renamed or deleted upstream repository cannot break an install. (Files over 2 GB are stored in parts and joined while downloading.)
+- **Own FFmpeg:** a lean build made here from the official, signed FFmpeg 8.1.2 source — only FFmpeg's own code plus zlib, LGPL, 25 MB. SuperSubtitler only reads audio, mixes channels and copies streams into MKV, so it needs no external codec libraries. The exact sources and the build script are in the same release.
+- **Checked for real:** CI installs exactly this set on Windows and subtitles a test clip on every change.
+
+Updating is deliberate: raise the versions in `runtime.json`, CI green, release. Existing installs switch to the new set automatically on their next start. Experts can still set their own `engine_spec` or models in the INI — that is installed as written, without the guarantee.
+
+---
+
 ## 🗣️ Language handling
 
 - **Default:** the spoken language of each track is detected (a sample is taken, split into windows and majority-voted) and the subtitles are written **in that language**.
 - **`-translate`:** translates everything to English (the only target Whisper translates to). Uses the large model, which is required for translation.
 - **`-lang:XX`:** skip detection and force a source language, e.g. `-lang:de`, `-lang:es`, `-lang:fr`.
 - **Mismatch?** If a file's language tag disagrees with what the audio actually is, you're asked which to trust (pressing Enter keeps the detected language).
+- **All questions up front.** Track choice and language questions are all asked at the start, before the long transcription part begins — once the progress bars appear you can walk away. With `-auto` nothing is asked at all.
 
 ---
 
@@ -80,6 +103,14 @@ Drag files or folders onto the EXE, or pass them as arguments. Flags and files m
 | `-novad` | Disable the silence filter (transcribe everything, pauses included) |
 | `-lowmem` | Smaller compute type (less video memory, a bit slower) |
 | `-split` | Export each audio channel as a WAV to find the speech; skip transcription |
+| `-auto` | Never ask: all audio tracks, the detected language, merge = yes |
+| `-force` | Redo files that already have subtitles (overwrites the old results) |
+| `-out:FOLDER` | Write the `.srt`/`.mkv` results into FOLDER instead of next to the source |
+| `-nowait` | Don't wait for Enter at the end (for scripts and shortcuts) |
+| `-setup` | Download and install everything, speech models included, then exit |
+| `-nomerge` | Never offer the merge mode; subtitle every dropped file |
+| `-json` | Machine-readable events on stdout, one JSON line each (for front-ends) |
+| `-version` | Print the version and exit |
 | `-help` | Show the banner and full options list |
 
 **Supported input** — Video → `.subbed.mkv`: `mkv mp4 mov m4v avi ts m2ts webm mpg wmv flv 3gp` · Audio → `.srt` only: `m4a mp3 wav flac aac ogg opus m4b`
@@ -110,7 +141,7 @@ Two plain-text files are created next to the EXE on first run:
 - Windows 10/11 x64
 - An NVIDIA GPU makes it much faster (CUDA libraries are auto-installed); **without one it automatically falls back to the CPU** (slower, but works)
 - FFmpeg, Python and the speech models are downloaded automatically on first run (a few GB, once, cached next to the EXE)
-- First run reaches `github.com` (FFmpeg), `python.org`, `pypi.org` and downloads the whisper models
+- First run reaches `github.com` (this project's runtime mirror); only if the mirror is unreachable also `python.org`, `pypi.org` and `huggingface.co`
 
 ---
 
@@ -133,6 +164,8 @@ If SmartScreen blocks the start: click **"More info" → "Run anyway"**.
 ```
 build.bat
 ```
+
+The window lives in `gui/` and has its own `gui/build.bat` (writes `SuperSubtitlerGUI.exe` next to `SuperSubtitler.exe`).
 
 `build.bat` packs the embedded source archive, runs `go mod tidy` and compiles `SuperSubtitler.exe` (Go 1.22+). The only external dependency is [pterm](https://github.com/pterm/pterm). The EXE is written to the parent folder, ready to run next to its downloaded FFmpeg/Python/models. Every released EXE also extracts its own sources on first run.
 
@@ -159,20 +192,37 @@ Found a bug? Open an issue with the console output.
 
 ## ⚠️ Disclaimer
 
-SuperSubtitler is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See the *No Liability* clause of the [license](LICENSE.md).
+SuperSubtitler is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See sections 15 and 16 of the [license](LICENSE).
 
 ---
 
 ## 📜 License
 
-**SuperSubtitler is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md).**
+SuperSubtitler — the console tool and the window in [`gui/`](gui/) — is free software under the [GNU General Public License, version 3](LICENSE) — that version only (`GPL-3.0-only`).
 
-That means: free to use, study, modify and share for any **noncommercial** purpose — personal use, hobby, education, research. **Commercial use, resale or bundling into paid products is not permitted** without a separate license from the author. Want a commercial license? Open an issue or reach out.
+- **Use it:** Anyone may use SuperSubtitler free of charge, at home or at work, and read, change and share its source code.
+- **The one condition:** Whoever passes on SuperSubtitler or parts of it — unchanged, changed or built into a program of their own — must include the complete source code and pass everything on under the same license. A closed, paid product with SuperSubtitler inside is therefore not possible.
+- **Free of charge:** SuperSubtitler is and stays free. The official source is [github.com/burnersen/SuperSubtitler](https://github.com/burnersen/SuperSubtitler) — anyone asking money for SuperSubtitler is selling you what you can get here for free.
+- **A separate license for companies:** Want to build SuperSubtitler into a product that is not meant to be under the GPLv3? You can ask the author for a separate license — just [open an issue](https://github.com/burnersen/SuperSubtitler/issues).
+
+Versions up to and including 0.1.0 were released under the PolyForm Noncommercial License 1.0.0; from 0.2.0 on, SuperSubtitler is under the GPLv3.
+
+### Third-party components
+
+The exes are built with these Go libraries. Each keeps its own license, and all of them are compatible with the GPLv3:
+
+- **MIT License:** [pterm](https://github.com/pterm/pterm) with [atomicgo/cursor](https://github.com/atomicgo/cursor), [atomicgo/keyboard](https://github.com/atomicgo/keyboard) and [atomicgo/schedule](https://github.com/atomicgo/schedule), [gookit/color](https://github.com/gookit/color), [lithammer/fuzzysearch](https://github.com/lithammer/fuzzysearch), [mattn/go-runewidth](https://github.com/mattn/go-runewidth), [rivo/uniseg](https://github.com/rivo/uniseg), [xo/terminfo](https://github.com/xo/terminfo); for the window [Wails](https://github.com/wailsapp/wails) and its libraries
+- **Apache License 2.0:** [containerd/console](https://github.com/containerd/console)
+- **BSD 3-Clause License:** the [Go standard library](https://go.dev/LICENSE) and [golang.org/x/sys](https://github.com/golang/sys), [x/term](https://github.com/golang/term), [x/text](https://github.com/golang/text)
+
+Their copyright notices and full license texts are in the repositories linked above.
 
 ### Engines & attribution
 
 SuperSubtitler does **not** bundle these; it downloads or invokes them:
 
 - **faster-whisper** — speech recognition engine by [SYSTRAN](https://github.com/SYSTRAN/faster-whisper) (MIT), installed via pip on first run. It runs OpenAI's **Whisper** models (MIT).
-- **FFmpeg** — all audio/video processing. On first run an official static build is downloaded from the [BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) project (GPL); FFmpeg is a separate work by the [FFmpeg project](https://ffmpeg.org) under its own license and is invoked as an external program.
+- **FFmpeg** — all audio/video processing. SuperSubtitler uses its own lean build of FFmpeg 8.1.2 (LGPL 2.1 or later), compiled by [`.github/scripts/build_ffmpeg.sh`](.github/scripts/build_ffmpeg.sh) from the unmodified, signature-checked [FFmpeg](https://ffmpeg.org) source plus [zlib](https://zlib.net); both source archives are in the `runtime-v1` release next to the build. FFmpeg is a separate work by the FFmpeg project under its own license and is invoked as an external program. This software uses code of FFmpeg licensed under the [LGPLv2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html).
 - **Python** — the official python.org Windows embeddable build, downloaded on first run to host the engine.
+
+Python, pip, the Python packages, the Whisper model files and the FFmpeg build are mirrored in this repository's [`runtime-v1` release](https://github.com/burnersen/SuperSubtitler/releases/tag/runtime-v1). Their licences allow that (PSF, MIT, BSD, Apache 2.0, LGPL with the source alongside; the NVIDIA CUDA libraries under NVIDIA's licence, which allows redistribution with applications); the notices are listed there.

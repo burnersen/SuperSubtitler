@@ -1,11 +1,13 @@
 //go:build windows && amd64
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/pterm/pterm"
@@ -52,9 +54,11 @@ type langPlan struct {
 }
 
 // decideLanguage resolves the source language from the container tag and the
-// (always performed) detection, prompting the user only when nothing is
-// conclusive. forcedLang short-circuits detection; -translate skips the prompt.
-func decideLanguage(cfg *AppConfig, tagLang, detectedLang string) string {
+// detection, prompting the user only when nothing is conclusive. forcedLang
+// short-circuits detection; -translate skips the prompt; -auto answers every
+// prompt with its default (detected language, or engine guess when unknown).
+// file names the input in the question event.
+func decideLanguage(cfg *AppConfig, tagLang, detectedLang, file string) string {
 	if cfg.forcedLang != "" {
 		return normalizeLang(cfg.forcedLang)
 	}
@@ -66,15 +70,22 @@ func decideLanguage(cfg *AppConfig, tagLang, detectedLang string) string {
 		if cfg.translate {
 			return det // output is English anyway; no need to ask
 		}
-		return resolveLangDiscrepancy(tag, det)
+		if cfg.auto {
+			pInfo.Printf("Language mismatch (tag %s, detected %s) — -auto keeps the detected language.\n", tag, det)
+			return det
+		}
+		return resolveLangDiscrepancy(tag, det, file)
 	case det != "":
 		return det
 	case tag != "":
 		return tag
 	case cfg.translate:
 		return "" // translate can auto-detect the source; no need to ask
+	case cfg.auto:
+		pWarn.Println("Could not determine the spoken language — -auto lets the engine guess (tagged und).")
+		return ""
 	default:
-		return promptForLanguage()
+		return promptForLanguage(file)
 	}
 }
 
@@ -98,7 +109,7 @@ func buildPlan(cfg *AppConfig, srcLang string) langPlan {
 // language disagree. It asks which to use; pressing Enter keeps the detected
 // language (the safer default — container tags are often wrong). Typing the tag
 // code uses the tag; any other code overrides both.
-func resolveLangDiscrepancy(tag, det string) string {
+func resolveLangDiscrepancy(tag, det, file string) string {
 	fmt.Println()
 	pWarn.Printf("Language mismatch: container tag says %s, detection says %s.\n",
 		pterm.LightYellow(tag), pterm.LightCyan(det))
@@ -106,7 +117,11 @@ func resolveLangDiscrepancy(tag, det string) string {
 		"  Press Enter to use the detected %s, type %s for the tag, or enter another code.",
 		pterm.LightCyan(det), pterm.LightYellow(tag))))
 	pterm.Print(pterm.LightCyan("  Language: "))
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	emitQuestion(eventQuestion{
+		Kind: questionLangMismatch, File: file, Tag: tag, Detected: det, Default: det,
+		Hint: "Enter = detected language",
+	})
+	line, _ := readAnswerLine()
 	if code := normalizeLang(line); code != "" {
 		return code
 	}
@@ -114,19 +129,14 @@ func resolveLangDiscrepancy(tag, det string) string {
 }
 
 // promptForLanguage asks the user for a language code when detection and tags
-// both fail. Runs interactively on the console.
-func promptForLanguage() string {
+// both fail. An empty answer or a closed stdin lets the engine guess (""), so a
+// front-end that goes away can never leave this loop spinning.
+func promptForLanguage(file string) string {
 	fmt.Println()
 	pWarn.Println("Could not determine the spoken language for this file.")
-	pterm.Println(pterm.Gray("  Enter the language code (e.g. de, en, es, fr) and press Enter."))
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Print(pterm.LightCyan("  Language code: "))
-		line, _ := reader.ReadString('\n')
-		code := normalizeLang(line)
-		if code != "" {
-			return code
-		}
-		pWarn.Println("Please enter a non-empty language code.")
-	}
+	pterm.Println(pterm.Gray("  Enter the language code (e.g. de, en, es, fr), or just Enter to let the engine guess."))
+	fmt.Print(pterm.LightCyan("  Language code: "))
+	emitQuestion(eventQuestion{Kind: questionLangUnknown, File: file, Default: "und", Hint: "Enter = let the engine guess"})
+	line, _ := readAnswerLine()
+	return normalizeLang(line)
 }

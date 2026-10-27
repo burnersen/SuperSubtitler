@@ -1,8 +1,13 @@
 //go:build windows && amd64
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,10 +32,10 @@ type AppSettings struct {
 	modelTranslate  string // -translate path (English output); turbo cannot translate
 
 	// Engine runtime
-	device           string // "cuda" (GPU, CPU fallback) or "cpu"
-	computeType      string // float16 on GPU
+	device            string // "cuda" (GPU, CPU fallback) or "cpu"
+	computeType       string // float16 on GPU
 	computeTypeLowMem string // int8 etc. for -lowmem
-	beamSize         int
+	beamSize          int
 
 	// Python runtime
 	pythonVersion string // embeddable Python version to fetch (X.Y.Z)
@@ -38,9 +43,9 @@ type AppSettings struct {
 	installCUDA   bool   // pip-install the CUDA wheels so the GPU path works out of the box
 
 	// VAD / anti-hallucination
-	vadFilter        bool
-	vadThreshold     float64
-	vadSpeechPadMs   int
+	vadFilter         bool
+	vadThreshold      float64
+	vadSpeechPadMs    int
 	conditionPrevious bool   // keep false to break repetition loops
 	initialPrompt     string // optional steering prompt
 
@@ -70,7 +75,17 @@ type AppConfig struct {
 	lean          bool   // -lean: drop foreign streams, keep video + chosen audio
 	noVad         bool   // -novad: disable the silence filter
 	lowMem        bool   // -lowmem: smaller compute type
+	auto          bool   // -auto: never ask, take every default answer
+	force         bool   // -force: redo files that already have subtitles
+	outDir        string // -out:<dir>: write results there instead of next to the source
+	noWait        bool   // -nowait: no "Press Enter" at the end
+	json          bool   // -json: machine-readable events on stdout
+	setup         bool   // -setup: install everything (incl. models), then exit
+	noMerge       bool   // -nomerge: never offer merge mode, subtitle every input
+	checkConfig   string // -checkconfig:FILE: validate an INI, print ok/invalid, exit
+	version       bool   // -version: print the version and exit
 	help          bool   // -help: show usage and exit
+	unknownFlags  []string
 	inputArgs     []string
 }
 
@@ -86,7 +101,7 @@ func defaultSettings() AppSettings {
 		computeTypeLowMem:  "int8",
 		beamSize:           5,
 		pythonVersion:      "3.12.10",
-		engineSpec:         "faster-whisper",
+		engineSpec:         defaultEngineSpec,
 		installCUDA:        true,
 		vadFilter:          true,
 		vadThreshold:       0.50,
@@ -107,6 +122,10 @@ func defaultSettings() AppSettings {
 
 var appSettings = defaultSettings()
 
+// defaultEngineSpec means "the tested, pinned package set from runtime.json".
+// Any other engine_spec is installed as written, newest versions, unpinned.
+const defaultEngineSpec = "faster-whisper"
+
 func configPath() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -125,18 +144,7 @@ func loadOrCreateAppConfig() {
 		writeDefaultConfig(path)
 		return
 	}
-	s := defaultSettings()
-	for _, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
-			continue
-		}
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		applySetting(&s, strings.TrimSpace(key), strings.TrimSpace(val))
-	}
+	s := parseSettings(string(data))
 	if !validateSettings(s) {
 		pWarn.Println("Invalid value in " + configFileName + " — file reset to defaults.")
 		writeDefaultConfig(path)
@@ -224,49 +232,73 @@ func applySetting(s *AppSettings, key, val string) {
 }
 
 func validateSettings(s AppSettings) bool {
-	if s.detectSeconds < 30 || s.detectSeconds > 1800 {
-		return false
+	return settingsProblem(s) == ""
+}
+
+// settingsProblem names the first out-of-range value, or "" when all are valid.
+// The text is shown by -checkconfig, so a front-end can refuse to save a value
+// that would otherwise make the next start reset the whole file.
+func settingsProblem(s AppSettings) string {
+	switch {
+	case s.detectSeconds < 30 || s.detectSeconds > 1800:
+		return "detect_seconds must be 30..1800"
+	case s.detectStartPercent < 0 || s.detectStartPercent > 90:
+		return "detect_start_percent must be 0..90"
+	case s.device != "cuda" && s.device != "cpu":
+		return "device must be cuda or cpu"
+	case s.surroundMode != "center_emphasis" && s.surroundMode != "pure_center":
+		return "surround_mode must be center_emphasis or pure_center"
+	case s.beamSize < 1 || s.beamSize > 10:
+		return "beam_size must be 1..10"
+	case s.vadThreshold < 0 || s.vadThreshold > 1:
+		return "vad_threshold must be 0..1"
+	case s.leadinMs < 0 || s.leadinMs > 5000:
+		return "leadin_ms must be 0..5000"
+	case s.subMaxCharsPerLine < 20 || s.subMaxCharsPerLine > 80:
+		return "sub_max_chars_per_line must be 20..80"
+	case s.subMaxLines < 1 || s.subMaxLines > 3:
+		return "sub_max_lines must be 1..3"
+	case s.subMaxCPS < 5 || s.subMaxCPS > 40:
+		return "sub_max_cps must be 5..40"
+	case s.subMinDurMs < 200 || s.subMinDurMs > s.subMaxDurMs:
+		return "sub_min_dur_ms must be at least 200 and not above sub_max_dur_ms"
+	case s.subMaxDurMs < 1000 || s.subMaxDurMs > 20000:
+		return "sub_max_dur_ms must be 1000..20000"
+	case s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "":
+		return "detect_model, model_transcribe, model_translate and compute_type must not be empty"
+	case s.engineSpec == "" || strings.Count(s.pythonVersion, ".") < 2:
+		return "engine_spec must not be empty and python_version must be X.Y.Z"
 	}
-	if s.detectStartPercent < 0 || s.detectStartPercent > 90 {
-		return false
+	return ""
+}
+
+// parseSettings reads INI text over the defaults. Unknown keys are ignored.
+func parseSettings(text string) AppSettings {
+	s := defaultSettings()
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		applySetting(&s, strings.TrimSpace(key), strings.TrimSpace(val))
 	}
-	if s.device != "cuda" && s.device != "cpu" {
-		return false
+	return s
+}
+
+// checkConfigFile validates an INI file without touching it (-checkconfig).
+func checkConfigFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
 	}
-	if s.surroundMode != "center_emphasis" && s.surroundMode != "pure_center" {
-		return false
+	if p := settingsProblem(parseSettings(string(data))); p != "" {
+		return errors.New(p)
 	}
-	if s.beamSize < 1 || s.beamSize > 10 {
-		return false
-	}
-	if s.vadThreshold < 0 || s.vadThreshold > 1 {
-		return false
-	}
-	if s.leadinMs < 0 || s.leadinMs > 5000 {
-		return false
-	}
-	if s.subMaxCharsPerLine < 20 || s.subMaxCharsPerLine > 80 {
-		return false
-	}
-	if s.subMaxLines < 1 || s.subMaxLines > 3 {
-		return false
-	}
-	if s.subMaxCPS < 5 || s.subMaxCPS > 40 {
-		return false
-	}
-	if s.subMinDurMs < 200 || s.subMinDurMs > s.subMaxDurMs {
-		return false
-	}
-	if s.subMaxDurMs < 1000 || s.subMaxDurMs > 20000 {
-		return false
-	}
-	if s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "" {
-		return false
-	}
-	if s.engineSpec == "" || strings.Count(s.pythonVersion, ".") < 2 {
-		return false
-	}
-	return true
+	return nil
 }
 
 func writeDefaultConfig(path string) {
@@ -285,7 +317,9 @@ detect_model=%s
 [models]
 # model_transcribe is used for EVERY language (turbo: fast, multilingual).
 # model_translate is used only for -translate (English output); it must be a
-# large model — turbo cannot translate.
+# large model — turbo cannot translate. large-v3-turbo and large-v3 are pinned
+# to an exact, verified revision (from this project's mirror first); any other
+# name is fetched as its source currently offers it.
 model_transcribe=%s
 model_translate=%s
 
@@ -296,11 +330,14 @@ compute_type_lowmem=%s
 beam_size=%d
 
 [python]
-# Embedded Python runtime. python_version must be a full X.Y.Z that python.org
-# ships as an "embed-amd64" build. engine_spec is the pip package (pin it like
-# faster-whisper==1.0.3 to freeze a version). install_cuda pulls the CUDA wheels
-# so the GPU works without a system CUDA toolkit. Changing engine_spec re-runs
-# pip on the next start; delete the Python\ folder to rebuild from scratch.
+# With the defaults (python_version as shipped, engine_spec=faster-whisper)
+# SuperSubtitler installs its tested set: exact versions of Python, pip, the
+# engine, every package and the CUDA libraries, each checked against its
+# SHA-256 (built into the EXE). Change either value only if you know why:
+# then the newest versions are installed instead, NOT the tested set (pin
+# like faster-whisper==1.0.3 to freeze one yourself). install_cuda pulls the
+# CUDA libraries so the GPU works without a system CUDA toolkit. Delete the
+# Python\ folder to rebuild from scratch.
 python_version=%s
 engine_spec=%s
 install_cuda=%t

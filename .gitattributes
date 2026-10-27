@@ -1,0 +1,26 @@
+# Go sources are LF, always. gofmt normalises line endings to LF, so a CRLF
+# checkout (git's default on Windows) is reported as "unformatted" and the
+# gofmt step in CI could never pass.
+*.go     text eol=lf
+go.mod   text eol=lf
+go.sum   text eol=lf
+*.py     text eol=lf
+
+# The GUI's window is one HTML file plus small scripts.
+*.html   text eol=lf
+*.json   text eol=lf
+*.js     text eol=lf
+*.ts     text eol=lf
+
+# Workflow files: LF, so the PowerShell blocks inside stay intact everywhere.
+*.yml    text eol=lf
+
+# Batch files must stay CRLF or cmd.exe misreads labels and line ends.
+*.bat    text eol=crlf
+
+*.md     text
+.gitignore text
+
+*.png    binary
+*.ico    binary
+*.exe    binary
