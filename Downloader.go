@@ -299,9 +299,15 @@ func unlockEmbeddedSitePackages(pythonDir string) error {
 	return nil
 }
 
+// pipBootstrap installs the pip wheel given as argument with pip's own code
+// loaded straight from that wheel.
+const pipBootstrap = "import sys; sys.path.insert(0, sys.argv[1]); " +
+	"from pip._internal.cli.main import main; " +
+	"sys.exit(main(['install', '--no-index', '--no-warn-script-location', sys.argv[1]]))"
+
 // enablePip installs pip once. Pinned: the pinned pip wheel (verified) runs
-// itself to install itself — "python pip.whl/pip install pip.whl", pip's own
-// documented bootstrap, with no get-pip.py whose content changes over time.
+// itself to install itself (see pipBootstrap) — no get-pip.py, whose content
+// changes over time.
 // Custom: get-pip.py as before. Scripts\pip.exe is the install marker.
 func enablePip(ctx context.Context, pythonDir, pyExe string, pinned bool) error {
 	if fileExists(filepath.Join(pythonDir, "Scripts", "pip.exe")) {
@@ -324,7 +330,10 @@ func enablePip(ctx context.Context, pythonDir, pyExe string, pinned bool) error 
 			return err
 		}
 		emitSetup("pip", "progress", "Installing pip "+f.Version, 0, 0, 0)
-		if _, err := runProcess(ctx, pyExe, filepath.Join(whl, "pip"), "install", "--no-index", "--no-warn-script-location", whl); err != nil {
+		// pip runs from its own wheel to install itself. Started as "-c" and
+		// not as "<wheel>/pip": pip on Windows refuses to modify itself when
+		// its program name is "pip" (caught by the CI end-to-end test).
+		if _, err := runProcess(ctx, pyExe, "-c", pipBootstrap, whl); err != nil {
 			stop()
 			return fmt.Errorf("Downloader.go: enablePip (pip wheel): %w", err)
 		}
