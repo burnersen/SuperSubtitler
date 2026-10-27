@@ -90,12 +90,20 @@ func probeCLI() CLIStatus {
 }
 
 // setupLooksComplete checks the markers the CLI leaves after its one-time
-// setup: FFmpeg, the ready Python runtime and at least one fetched model.
+// setup: FFmpeg, the ready Python runtime and at least one fetched model
+// (pinned models mark their folder with .complete, others are listed in
+// .ss_models).
 func setupLooksComplete(dir string) bool {
-	return fileExists(filepath.Join(dir, "ffmpeg.exe")) &&
-		fileExists(filepath.Join(dir, "ffprobe.exe")) &&
-		fileExists(filepath.Join(dir, "Python", ".ss_ready")) &&
-		fileExists(filepath.Join(dir, "whisper", "models", ".ss_models"))
+	if !fileExists(filepath.Join(dir, "ffmpeg.exe")) || !fileExists(filepath.Join(dir, "ffprobe.exe")) ||
+		!fileExists(filepath.Join(dir, "Python", ".ss_ready")) {
+		return false
+	}
+	models := filepath.Join(dir, "whisper", "models")
+	if fileExists(filepath.Join(models, ".ss_models")) {
+		return true
+	}
+	done, _ := filepath.Glob(filepath.Join(models, "pinned", "*", ".complete"))
+	return len(done) > 0
 }
 
 var httpClient = &http.Client{Timeout: 10 * time.Minute}

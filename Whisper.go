@@ -160,7 +160,7 @@ func detectLanguages(ctx context.Context, chunks []string, outDir string, onLine
 		return nil, fmt.Errorf("Whisper.go: detectLanguages (mkdir): %w", err)
 	}
 	baseArgs := []string{
-		fModel, appSettings.detectModel,
+		fModel, modelArg(appSettings.detectModel),
 		fModelDir, modelDir,
 		fTask, "transcribe",
 		fOutputDir, outDir,
@@ -228,7 +228,7 @@ func transcribe(ctx context.Context, cfg *AppConfig, wavPath, model, task, lang,
 		return nil, fmt.Errorf("Whisper.go: transcribe (mkdir): %w", err)
 	}
 	baseArgs := []string{
-		fModel, model,
+		fModel, modelArg(model),
 		fModelDir, modelDir,
 		fTask, task,
 		fOutputDir, outDir,

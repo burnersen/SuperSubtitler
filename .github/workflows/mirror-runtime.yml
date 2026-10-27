@@ -1,0 +1,33 @@
+# Fills the mirror release with the exact runtime files SuperSubtitler
+# installs (runtime.json): embedded Python, pip and the speech models.
+# SuperSubtitler downloads from there first, so a renamed or deleted upstream
+# repository can never break an install. Safe to run again at any time:
+# files already mirrored are skipped. Runs on its own whenever runtime.json
+# changes, or by hand (Actions -> Mirror runtime -> Run workflow).
+name: Mirror runtime
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - runtime.json
+      - .github/scripts/mirror_runtime.py
+      - .github/workflows/mirror-runtime.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-runtime
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: mirror
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/mirror_runtime.py

@@ -7,8 +7,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -22,19 +20,6 @@ import (
 
 	"github.com/pterm/pterm"
 )
-
-// BtbN removed the floating "latest" release tag (the old fixed download URL now
-// returns 404), so the newest autobuild is resolved at runtime via the GitHub API.
-const ffmpegReleasesAPI = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=5"
-
-type ghRelease struct {
-	Assets []ghAsset `json:"assets"`
-}
-
-type ghAsset struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
-}
 
 // httpClient bounds connect/handshake/response time on every download, so a
 // stalled connection can never hang the tool forever behind a spinner. The
@@ -50,52 +35,6 @@ var httpClient = &http.Client{
 	},
 }
 
-// resolveFFmpegDownloadURL returns the download URL of the newest static win64
-// GPL master build (the flavour the old "latest" tag pointed at). Fallback: any
-// non-shared win64 GPL zip from the newest releases.
-func resolveFFmpegDownloadURL() (string, error) {
-	req, err := http.NewRequest(http.MethodGet, ffmpegReleasesAPI, nil)
-	if err != nil {
-		return "", fmt.Errorf("Downloader.go: resolveFFmpegDownloadURL: %w", err)
-	}
-	req.Header.Set("User-Agent", "SuperSubtitler") // GitHub rejects requests without one
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Downloader.go: resolveFFmpegDownloadURL: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Downloader.go: resolveFFmpegDownloadURL: GitHub API returned HTTP %d", resp.StatusCode)
-	}
-
-	var releases []ghRelease
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&releases); err != nil {
-		return "", fmt.Errorf("Downloader.go: resolveFFmpegDownloadURL (decode): %w", err)
-	}
-	var fallback string
-	for _, rel := range releases {
-		for _, a := range rel.Assets {
-			n := strings.ToLower(a.Name)
-			if !strings.HasSuffix(n, ".zip") || !strings.Contains(n, "win64-gpl") || strings.Contains(n, "shared") {
-				continue
-			}
-			// Master build, e.g. "ffmpeg-N-124941-g54749da98a-win64-gpl.zip".
-			if strings.HasPrefix(n, "ffmpeg-n-") && strings.HasSuffix(n, "-win64-gpl.zip") {
-				return a.BrowserDownloadURL, nil
-			}
-			if fallback == "" {
-				fallback = a.BrowserDownloadURL
-			}
-		}
-	}
-	if fallback != "" {
-		return fallback, nil
-	}
-	return "", errors.New("Downloader.go: resolveFFmpegDownloadURL: no win64-gpl zip found in the latest releases")
-}
-
 // embeddedDriver is transcribe.py, written into Python\ on first run and kept
 // in sync with the installed engine version.
 //
@@ -104,10 +43,9 @@ var embeddedDriver []byte
 
 const getPipURL = "https://bootstrap.pypa.io/get-pip.py"
 
-// cudaWheels are the pip packages that ship the CUDA cuBLAS/cuDNN DLLs, so the
-// GPU path works without a system-wide CUDA toolkit. cu12 matches CTranslate2's
-// CUDA 12 builds used by current faster-whisper. If a future engine moves to a
-// new CUDA generation, change these two names.
+// cudaWheels ship the CUDA cuBLAS/cuDNN DLLs so the GPU path works without a
+// system-wide CUDA toolkit. Used only with a custom engine_spec; the default
+// installs the pinned versions from runtime.json instead.
 var cudaWheels = []string{"nvidia-cublas-cu12", "nvidia-cudnn-cu12"}
 
 func pythonEmbedURL(version string) string {
@@ -127,37 +65,52 @@ func pthName(version string) string {
 // FFmpeg
 // ----------------------------------------------------------------------------
 
-// downloadFFmpeg streams the official BtbN GPL build to a temp file and extracts
-// only ffmpeg.exe and ffprobe.exe into targetDir.
-func downloadFFmpeg(targetDir string) error {
-	spinner, _ := pterm.DefaultSpinner.WithText("Looking up the latest FFmpeg build...").Start()
+// ffmpegMarkerName records which pinned FFmpeg build is next to the EXE. An
+// FFmpeg without it (an older auto-download, or one put there by hand) is
+// replaced by the pinned build, so every install runs the same FFmpeg.
+const ffmpegMarkerName = ".ss_ffmpeg"
+
+func ffmpegMarker() string { return pins.FFmpeg.Version + " " + pins.FFmpeg.SHA256 }
+
+// ffmpegIsPinned reports whether ffmpeg.exe/ffprobe.exe in dir are the pinned build.
+func ffmpegIsPinned(dir string) bool {
+	return fileExists(filepath.Join(dir, "ffmpeg.exe")) && fileExists(filepath.Join(dir, "ffprobe.exe")) &&
+		markerMatches(filepath.Join(dir, ffmpegMarkerName), ffmpegMarker())
+}
+
+// downloadFFmpeg fetches the pinned FFmpeg build (checked against its SHA-256)
+// and extracts only ffmpeg.exe and ffprobe.exe into targetDir.
+func downloadFFmpeg(ctx context.Context, targetDir string) error {
+	label := "Downloading FFmpeg " + pins.FFmpeg.Version
+	spinner, _ := pterm.DefaultSpinner.WithText(label + "...").Start()
+	currentSpinner.Store(spinner)
+	defer currentSpinner.Store(nil)
 	stop := func() {
 		if spinner != nil {
 			_ = spinner.Stop()
 		}
 	}
-	emitSetup("ffmpeg", "start", "Looking up the latest FFmpeg build", 0, 0, 0)
-
-	downloadURL, err := resolveFFmpegDownloadURL()
+	tmp, err := os.CreateTemp("", "ffmpeg-*.zip")
 	if err != nil {
+		stop()
+		return fmt.Errorf("Downloader.go: downloadFFmpeg (temp): %w", err)
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+	f := pins.FFmpeg
+	if err := downloadPinned(ctx, "ffmpeg", label, tmp.Name(), f.Size, f.SHA256,
+		pins.sourcesFor(f.File, f.URL, f.Size, f.Mirror)); err != nil {
 		stop()
 		return err
 	}
-	tmpPath, err := httpDownloadToFile(downloadURL, "ffmpeg-download-*.zip", "ffmpeg", "Downloading FFmpeg", spinner)
-	if err != nil {
-		stop()
-		return err
-	}
-	defer os.Remove(tmpPath)
 	if spinner != nil {
 		spinner.UpdateText("Extracting FFmpeg...")
 	}
-
 	targets := map[string]string{
 		"bin/ffmpeg.exe":  filepath.Join(targetDir, "ffmpeg.exe"),
 		"bin/ffprobe.exe": filepath.Join(targetDir, "ffprobe.exe"),
 	}
-	extracted, err := extractZipEntries(tmpPath, targets)
+	extracted, err := extractZipEntries(tmp.Name(), targets)
 	stop()
 	if err != nil {
 		return err
@@ -165,7 +118,10 @@ func downloadFFmpeg(targetDir string) error {
 	if extracted < 2 {
 		return fmt.Errorf("Downloader.go: downloadFFmpeg: only %d of 2 executables found in archive", extracted)
 	}
-	pOK.Println("FFmpeg auto-download complete: ffmpeg.exe + ffprobe.exe installed.")
+	if err := os.WriteFile(filepath.Join(targetDir, ffmpegMarkerName), []byte(ffmpegMarker()), 0644); err != nil {
+		return fmt.Errorf("Downloader.go: downloadFFmpeg (marker): %w", err)
+	}
+	pOK.Println("FFmpeg " + pins.FFmpeg.Version + " installed (verified).")
 	return nil
 }
 
@@ -224,15 +180,21 @@ func writeZipFile(f *zip.File, destPath string) error {
 // ----------------------------------------------------------------------------
 
 // ensurePython guarantees Python\python.exe with the engine installed and
-// Python\transcribe.py present. The marker file stores the engine spec, so a
-// changed engine_spec re-installs the engine without re-downloading Python.
+// Python\transcribe.py present. The marker stores what was installed — the
+// pinned set's lockID, or a custom engine_spec — so a new SuperSubtitler with
+// new pins (or a changed engine_spec) reinstalls the engine without
+// re-downloading Python.
 func ensurePython(ctx context.Context, pythonDir string) error {
 	pyExe := filepath.Join(pythonDir, "python.exe")
 	driver := filepath.Join(pythonDir, "transcribe.py")
 	marker := filepath.Join(pythonDir, ".ss_ready")
-	spec := appSettings.engineSpec
+	pinned := usesPinnedEngine(appSettings)
+	want := appSettings.engineSpec
+	if pinned {
+		want = pins.lockID(appSettings.installCUDA)
+	}
 
-	if markerMatches(marker, spec) && fileExists(pyExe) && fileExists(driver) {
+	if markerMatches(marker, want) && fileExists(pyExe) && fileExists(driver) {
 		// A newer SuperSubtitler may ship a newer driver: keep it in sync even
 		// when the engine itself does not need to be reinstalled.
 		if cur, err := os.ReadFile(driver); err != nil || !bytes.Equal(cur, embeddedDriver) {
@@ -242,25 +204,33 @@ func ensurePython(ctx context.Context, pythonDir string) error {
 		}
 		return nil
 	}
+	if !pinned {
+		pWarn.Println("engine_spec or python_version differ from the defaults — installing the newest versions, " +
+			"NOT the tested set (restore the defaults to get it back).")
+	}
 
 	if !fileExists(pyExe) {
-		if err := installEmbeddedPython(pythonDir); err != nil {
+		if err := installEmbeddedPython(ctx, pythonDir, pinned); err != nil {
 			return err
 		}
 	}
-	if err := enablePip(ctx, pythonDir, pyExe); err != nil {
+	if err := enablePip(ctx, pythonDir, pyExe, pinned); err != nil {
 		return err
 	}
-	if err := installEngine(ctx, pyExe, spec); err != nil {
+	if err := installEngine(ctx, pyExe, pinned); err != nil {
 		return err
 	}
 	if err := os.WriteFile(driver, embeddedDriver, 0644); err != nil {
 		return fmt.Errorf("Downloader.go: ensurePython (write driver): %w", err)
 	}
-	if err := os.WriteFile(marker, []byte(spec), 0644); err != nil {
+	if err := os.WriteFile(marker, []byte(want), 0644); err != nil {
 		return fmt.Errorf("Downloader.go: ensurePython (write marker): %w", err)
 	}
-	pOK.Println("Python runtime ready (engine: " + spec + ").")
+	if pinned {
+		pOK.Println("Python runtime ready (tested set: " + runtimeSummary() + ").")
+	} else {
+		pOK.Println("Python runtime ready (engine: " + appSettings.engineSpec + ").")
+	}
 	return nil
 }
 
@@ -269,13 +239,33 @@ func markerMatches(marker, spec string) bool {
 	return err == nil && strings.TrimSpace(string(data)) == spec
 }
 
-func installEmbeddedPython(pythonDir string) error {
+func installEmbeddedPython(ctx context.Context, pythonDir string, pinned bool) error {
 	label := "Downloading embedded Python " + appSettings.pythonVersion
 	spinner, _ := pterm.DefaultSpinner.WithText(label + "...").Start()
-	tmpPath, err := httpDownloadToFile(pythonEmbedURL(appSettings.pythonVersion), "python-embed-*.zip", "python", label, spinner)
-	if err != nil {
-		_ = spinner.Stop()
-		return err
+	currentSpinner.Store(spinner)
+	defer currentSpinner.Store(nil)
+	var tmpPath string
+	if pinned {
+		tmp, err := os.CreateTemp("", "python-embed-*.zip")
+		if err != nil {
+			_ = spinner.Stop()
+			return err
+		}
+		tmp.Close()
+		tmpPath = tmp.Name()
+		f := pins.Python
+		if err := downloadPinned(ctx, "python", label, tmpPath, f.Size, f.SHA256, pins.sourcesFor(f.File, f.URL, f.Size, f.Mirror)); err != nil {
+			os.Remove(tmpPath)
+			_ = spinner.Stop()
+			return err
+		}
+	} else {
+		p, err := httpDownloadToFile(pythonEmbedURL(appSettings.pythonVersion), "python-embed-*.zip", "python", label, spinner)
+		if err != nil {
+			_ = spinner.Stop()
+			return err
+		}
+		tmpPath = p
 	}
 	defer os.Remove(tmpPath)
 	spinner.UpdateText("Extracting Python...")
@@ -309,44 +299,94 @@ func unlockEmbeddedSitePackages(pythonDir string) error {
 	return nil
 }
 
-// enablePip downloads and runs get-pip.py once. pip is invoked later via
-// "python.exe -m pip", so the presence of Scripts\pip.exe is the install marker.
-func enablePip(ctx context.Context, pythonDir, pyExe string) error {
+// enablePip installs pip once. Pinned: the pinned pip wheel (verified) runs
+// itself to install itself — "python pip.whl/pip install pip.whl", pip's own
+// documented bootstrap, with no get-pip.py whose content changes over time.
+// Custom: get-pip.py as before. Scripts\pip.exe is the install marker.
+func enablePip(ctx context.Context, pythonDir, pyExe string, pinned bool) error {
 	if fileExists(filepath.Join(pythonDir, "Scripts", "pip.exe")) {
 		return nil
 	}
 	spinner, _ := pterm.DefaultSpinner.WithText("Bootstrapping pip...").Start()
+	currentSpinner.Store(spinner)
+	defer currentSpinner.Store(nil)
+	stop := func() {
+		if spinner != nil {
+			_ = spinner.Stop()
+		}
+	}
+	if pinned {
+		f := pins.Pip
+		whl := filepath.Join(os.TempDir(), f.File) // pip needs the real wheel name
+		defer os.Remove(whl)
+		if err := downloadPinned(ctx, "pip", "Downloading pip "+f.Version, whl, f.Size, f.SHA256, pins.sourcesFor(f.File, f.URL, f.Size, f.Mirror)); err != nil {
+			stop()
+			return err
+		}
+		emitSetup("pip", "progress", "Installing pip "+f.Version, 0, 0, 0)
+		if _, err := runProcess(ctx, pyExe, filepath.Join(whl, "pip"), "install", "--no-index", "--no-warn-script-location", whl); err != nil {
+			stop()
+			return fmt.Errorf("Downloader.go: enablePip (pip wheel): %w", err)
+		}
+		stop()
+		emitSetup("pip", "done", "pip "+f.Version+" installed", 0, 0, 0)
+		return nil
+	}
 	getPip, err := httpDownloadToFile(getPipURL, "get-pip-*.py", "pip", "Downloading pip", spinner)
 	if err != nil {
-		_ = spinner.Stop()
+		stop()
 		return err
 	}
 	defer os.Remove(getPip)
 	emitSetup("pip", "progress", "Installing pip", 0, 0, 0)
 	if _, err := runProcess(ctx, pyExe, getPip, "--no-warn-script-location"); err != nil {
-		_ = spinner.Stop()
+		stop()
 		return fmt.Errorf("Downloader.go: enablePip (get-pip): %w", err)
 	}
-	_ = spinner.Stop()
+	stop()
 	emitSetup("pip", "done", "pip installed", 0, 0, 0)
 	return nil
 }
 
-// installEngine pip-installs the configured engine spec and, when enabled, the
-// CUDA wheels. --upgrade keeps the engine current on every (re-)install.
-func installEngine(ctx context.Context, pyExe, spec string) error {
+// installEngine installs the engine. Pinned: exactly the packages in
+// runtime.json, each checked against its hash (--require-hashes also refuses
+// any dependency that is not in the list). Custom: the engine_spec, newest.
+func installEngine(ctx context.Context, pyExe string, pinned bool) error {
 	spinner, _ := pterm.DefaultSpinner.WithText("Installing whisper engine (large, one-time)...").Start()
-	if err := runPip(ctx, pyExe, spinner, "engine", "Installing whisper engine", "--upgrade", spec); err != nil {
-		_ = spinner.Stop()
-		return fmt.Errorf("Downloader.go: installEngine (pip install %s): %w", spec, err)
+	defer func() { _ = spinner.Stop() }()
+	if !pinned {
+		spec := appSettings.engineSpec
+		if err := runPip(ctx, pyExe, spinner, "engine", "Installing whisper engine", "--upgrade", spec); err != nil {
+			return fmt.Errorf("Downloader.go: installEngine (pip install %s): %w", spec, err)
+		}
+		if appSettings.installCUDA {
+			if err := runPip(ctx, pyExe, spinner, "cuda", "Installing CUDA libraries", cudaWheels...); err != nil {
+				return fmt.Errorf("Downloader.go: installEngine (pip install cuda): %w", err)
+			}
+		}
+		return nil
+	}
+	install := func(step, label string, cuda bool) error {
+		req, err := os.CreateTemp("", "ss-requirements-*.txt")
+		if err != nil {
+			return err
+		}
+		defer os.Remove(req.Name())
+		if _, err := req.WriteString(pins.requirementsText(cuda)); err != nil {
+			req.Close()
+			return err
+		}
+		req.Close()
+		return runPip(ctx, pyExe, spinner, step, label, "--require-hashes", "--only-binary=:all:", "-r", req.Name())
+	}
+	if err := install("engine", "Installing whisper engine (tested set)", false); err != nil {
+		return fmt.Errorf("Downloader.go: installEngine (pinned packages): %w", err)
 	}
 	if appSettings.installCUDA {
-		if err := runPip(ctx, pyExe, spinner, "cuda", "Installing CUDA libraries", cudaWheels...); err != nil {
-			_ = spinner.Stop()
-			return fmt.Errorf("Downloader.go: installEngine (pip install cuda): %w", err)
+		if err := install("cuda", "Installing CUDA libraries (tested set)", true); err != nil {
+			return fmt.Errorf("Downloader.go: installEngine (pinned CUDA packages): %w", err)
 		}
 	}
-	_ = spinner.Stop()
 	return nil
 }
 
@@ -420,27 +460,110 @@ func pipStatus(line string) (string, bool) {
 // modelMarkerName lists the models already fetched ("name<TAB>path" per line).
 const modelMarkerName = ".ss_models"
 
+// modelPaths maps a model name to the folder it was installed in. Detection
+// and transcription load that folder directly (see modelArg), so a pinned
+// model is used exactly as verified, without asking any server again.
+var modelPaths = map[string]string{}
+
+// modelArg is what the engine is given for a model: its installed folder when
+// known, else the name (the engine then resolves it itself).
+func modelArg(name string) string {
+	if p, ok := modelPaths[name]; ok && p != "" {
+		return p
+	}
+	return name
+}
+
 // ensureModels fetches every listed speech model up front, so the (1.5–3 GB)
 // download happens with visible progress here instead of silently inside the
-// first language detection. Models already recorded in the marker whose folder
-// still exists are skipped without touching the network.
+// first language detection. Pinned models (runtime.json) come from the mirror
+// first, at their exact revision, every file checked against its SHA-256.
+// Other names (an expert's own choice in the INI) are fetched by the engine;
+// those already recorded in the marker whose folder still exists are skipped
+// without touching the network.
 func ensureModels(ctx context.Context, models []string) error {
 	marker := filepath.Join(modelDir, modelMarkerName)
 	known := readModelMarker(marker)
 	for _, m := range models {
-		if p, ok := known[m]; ok && dirExists(p) {
+		if pm, ok := pins.Models[m]; ok {
+			path, err := ensurePinnedModel(ctx, m, pm)
+			if err != nil {
+				return err
+			}
+			modelPaths[m] = path
 			continue
 		}
+		if p, ok := known[m]; ok && dirExists(p) {
+			modelPaths[m] = p
+			continue
+		}
+		pWarn.Println("Speech model " + m + " is not part of the tested set — using whatever its source currently offers.")
 		path, err := fetchModel(ctx, m)
 		if err != nil {
 			return err
 		}
 		known[m] = path
+		modelPaths[m] = path
 		if err := writeModelMarker(marker, known); err != nil {
 			pWarn.Println("Could not record the downloaded model: " + shortErr(err))
 		}
 	}
 	return nil
+}
+
+// ensurePinnedModel makes sure whisper\models\pinned\<name>@<revision> holds
+// every file of the pinned model. A file already there is kept when its hash
+// matches (an interrupted download resumes with the next file).
+func ensurePinnedModel(ctx context.Context, name string, pm pinnedModel) (string, error) {
+	dir := filepath.Join(modelDir, "pinned", name+"@"+pm.Revision[:12])
+	complete := filepath.Join(dir, ".complete")
+	if markerMatches(complete, pm.Revision) {
+		return dir, nil
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("Downloader.go: ensurePinnedModel (mkdir): %w", err)
+	}
+	var total int64
+	for _, f := range pm.Files {
+		total += f.Size
+	}
+	label := fmt.Sprintf("Downloading speech model %s (%.1f GB, one-time)", name, float64(total)/1e9)
+	spinner, _ := pterm.DefaultSpinner.WithText(label + "...").Start()
+	currentSpinner.Store(spinner)
+	defer currentSpinner.Store(nil)
+	defer func() {
+		if spinner != nil {
+			_ = spinner.Stop()
+		}
+	}()
+	emitSetup("model", "start", label, 0, float64(total)/bytesPerMB, 0)
+	for _, f := range pm.Files {
+		dest := filepath.Join(dir, f.Name)
+		if info, err := os.Stat(dest); err == nil && info.Size() == f.Size {
+			if got, err := sha256File(dest); err == nil && strings.EqualFold(got, f.SHA256) {
+				continue
+			}
+		}
+		if reuseCachedBlob(f, dest) {
+			pInfo.Printf("Speech model %s: %s taken from the existing model cache (verified).\n", name, f.Name)
+			continue
+		}
+		flabel := "Speech model " + name + ": " + f.Name
+		sources := pins.sourcesFor(modelAsset(name, f.Name), hfURL(pm, f.Name), f.Size, pm.Mirror)
+		if err := downloadPinned(ctx, "model", flabel, dest, f.Size, f.SHA256, sources); err != nil {
+			return "", err
+		}
+	}
+	if err := os.WriteFile(complete, []byte(pm.Revision), 0644); err != nil {
+		return "", fmt.Errorf("Downloader.go: ensurePinnedModel (marker): %w", err)
+	}
+	if spinner != nil {
+		_ = spinner.Stop()
+		spinner = nil
+	}
+	pOK.Printf("Speech model %s ready (revision %s, verified).\n", name, pm.Revision[:12])
+	emitSetup("model", "done", "Speech model "+name+" ready", float64(total)/bytesPerMB, float64(total)/bytesPerMB, 0)
+	return dir, nil
 }
 
 // fetchModel runs the driver's --prefetch mode for one model while watching the
@@ -501,6 +624,55 @@ func fetchModel(ctx context.Context, model string) (string, error) {
 	}
 	emitSetup("model", "done", "Speech model "+model+" ready", float64(max(grown, 0))/bytesPerMB, 0, 0)
 	return path, nil
+}
+
+// reuseCachedBlob looks for the file in the engine's own model cache, where an
+// older SuperSubtitler stored the same models: Hugging Face names large files
+// there by their SHA-256 (models--<org>--<name>\blobs\<sha256>). A match is
+// linked (or copied) instead of downloading gigabytes again — after checking
+// its hash like any download.
+func reuseCachedBlob(f modelFile, dest string) bool {
+	matches, _ := filepath.Glob(filepath.Join(modelDir, "models--*", "blobs", strings.ToLower(f.SHA256)))
+	for _, src := range matches {
+		info, err := os.Stat(src)
+		if err != nil || info.Size() != f.Size {
+			continue
+		}
+		if got, err := sha256File(src); err != nil || !strings.EqualFold(got, f.SHA256) {
+			continue
+		}
+		_ = os.Remove(dest)
+		if os.Link(src, dest) == nil {
+			return true
+		}
+		if copyFile(src, dest) == nil {
+			return true
+		}
+		_ = os.Remove(dest)
+	}
+	return false
+}
+
+func copyFile(src, dest string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dest + ".copy")
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(dest + ".copy")
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dest + ".copy")
+		return err
+	}
+	return os.Rename(dest+".copy", dest)
 }
 
 func readModelMarker(path string) map[string]string {

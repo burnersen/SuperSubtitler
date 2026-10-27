@@ -107,9 +107,11 @@ SUBTITLE CLEANER
   Nothing is hard-coded - you decide every term.
 
 FFMPEG
-  ffmpeg.exe and ffprobe.exe do all the audio/video work. If
-  they are missing, SuperSubtitler downloads them automatically.
-  You may also place them next to the EXE yourself.
+  ffmpeg.exe and ffprobe.exe do all the audio/video work.
+  SuperSubtitler downloads its tested FFmpeg build (8.1.2)
+  automatically and checks it; an FFmpeg of another origin
+  next to the EXE is replaced by it once, so every install
+  works with the same FFmpeg.
 
 CONFIGURATION
   SuperSubtitler_Config.ini (next to the EXE, created on first
@@ -122,6 +124,10 @@ FIRST RUN
   downloads a self-contained Python, the whisper engine and
   the speech models (a few GB, once). They are cached next to
   the EXE; delete the Python\ folder to rebuild from scratch.
+
+  Everything is a fixed, tested set (exact versions, every
+  file checked against its SHA-256), fetched from the
+  project's own mirror first - the same for every user.
 
 REQUIREMENTS
   Windows 10/11 x64. An Nvidia GPU makes it much faster; without

@@ -82,6 +82,7 @@ func run() (code int) {
 	cfg := parseArgs(os.Args[1:])
 	if cfg.version {
 		fmt.Println(appVersion)
+		fmt.Println(runtimeSummary())
 		return exitOK
 	}
 	// -checkconfig:FILE validates an INI without changing anything, so a
@@ -398,9 +399,13 @@ func initTools(ctx context.Context, cfg *AppConfig, needWhisper bool) error {
 	ffmpegPath = filepath.Join(dir, "ffmpeg.exe")
 	ffprobePath = filepath.Join(dir, "ffprobe.exe")
 
-	if !fileExists(ffmpegPath) || !fileExists(ffprobePath) {
-		pInfo.Println("FFmpeg not found next to the EXE — downloading once...")
-		if err := downloadFFmpeg(dir); err != nil {
+	if !ffmpegIsPinned(dir) {
+		if fileExists(ffmpegPath) {
+			pInfo.Println("Replacing FFmpeg with the tested build " + pins.FFmpeg.Version + " (one-time)...")
+		} else {
+			pInfo.Println("FFmpeg not found next to the EXE — downloading once...")
+		}
+		if err := downloadFFmpeg(ctx, dir); err != nil {
 			return err
 		}
 	}

@@ -57,6 +57,20 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 
 ---
 
+## 📌 The same tested runtime for everyone
+
+A fresh install used to take the newest of everything — and one day a new PyAV release broke every new installation. Now SuperSubtitler installs one **tested set**, the same for every user, written into the EXE ([`runtime.json`](runtime.json)):
+
+- **Exact versions** of Python (3.12.10), pip, FFmpeg (8.1.2), faster-whisper, CTranslate2, PyAV, every other package and the CUDA libraries — pip installs them with `--require-hashes`, so nothing unlisted slips in.
+- **Speech models at an exact revision** (large-v3-turbo, large-v3).
+- **Every file is checked against its SHA-256** before it is used; a damaged or changed download is refused.
+- **Own mirror first:** Python, pip and the models come from this project's [`runtime-v1` release](https://github.com/burnersen/SuperSubtitler/releases/tag/runtime-v1) first and only then from their original source — a renamed or deleted upstream repository cannot break an install. (Files over 2 GB are stored in parts and joined while downloading.)
+- **Checked for real:** CI installs exactly this set on Windows and subtitles a test clip on every change.
+
+Updating is deliberate: raise the versions in `runtime.json`, CI green, release. Existing installs switch to the new set automatically on their next start. Experts can still set their own `engine_spec` or models in the INI — that is installed as written, without the guarantee.
+
+---
+
 ## 🗣️ Language handling
 
 - **Default:** the spoken language of each track is detected (a sample is taken, split into windows and majority-voted) and the subtitles are written **in that language**.
@@ -125,7 +139,7 @@ Two plain-text files are created next to the EXE on first run:
 - Windows 10/11 x64
 - An NVIDIA GPU makes it much faster (CUDA libraries are auto-installed); **without one it automatically falls back to the CPU** (slower, but works)
 - FFmpeg, Python and the speech models are downloaded automatically on first run (a few GB, once, cached next to the EXE)
-- First run reaches `github.com` (FFmpeg), `python.org`, `pypi.org` and downloads the whisper models
+- First run reaches `github.com` (this project's runtime mirror and FFmpeg), `pypi.org`, and — only if the mirror is unreachable — `python.org` and `huggingface.co`
 
 ---
 
@@ -191,5 +205,7 @@ That means: free to use, study, modify and share for any **noncommercial** purpo
 SuperSubtitler does **not** bundle these; it downloads or invokes them:
 
 - **faster-whisper** — speech recognition engine by [SYSTRAN](https://github.com/SYSTRAN/faster-whisper) (MIT), installed via pip on first run. It runs OpenAI's **Whisper** models (MIT).
-- **FFmpeg** — all audio/video processing. On first run an official static build is downloaded from the [BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) project (GPL); FFmpeg is a separate work by the [FFmpeg project](https://ffmpeg.org) under its own license and is invoked as an external program.
+- **FFmpeg** — all audio/video processing. On first run the pinned build 8.1.2 "essentials" by [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) is downloaded from its [versioned GitHub release](https://github.com/GyanD/codexffmpeg/releases/tag/8.1.2) (GPL) and checked against its SHA-256; FFmpeg is a separate work by the [FFmpeg project](https://ffmpeg.org) under its own license and is invoked as an external program.
 - **Python** — the official python.org Windows embeddable build, downloaded on first run to host the engine.
+
+Python, pip and the Whisper model files are additionally mirrored, unchanged, in this repository's [`runtime-v1` release](https://github.com/burnersen/SuperSubtitler/releases/tag/runtime-v1) (PSF and MIT licences, which allow redistribution; the notices are listed there). FFmpeg is deliberately not mirrored: as a GPL binary it would come with the duty to ship its full source, so it is fetched from gyan.dev's permanent versioned release instead.

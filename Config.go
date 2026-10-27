@@ -97,7 +97,7 @@ func defaultSettings() AppSettings {
 		computeTypeLowMem:  "int8",
 		beamSize:           5,
 		pythonVersion:      "3.12.10",
-		engineSpec:         "faster-whisper",
+		engineSpec:         defaultEngineSpec,
 		installCUDA:        true,
 		vadFilter:          true,
 		vadThreshold:       0.50,
@@ -117,6 +117,10 @@ func defaultSettings() AppSettings {
 }
 
 var appSettings = defaultSettings()
+
+// defaultEngineSpec means "the tested, pinned package set from runtime.json".
+// Any other engine_spec is installed as written, newest versions, unpinned.
+const defaultEngineSpec = "faster-whisper"
 
 func configPath() string {
 	exe, err := os.Executable()
@@ -309,7 +313,9 @@ detect_model=%s
 [models]
 # model_transcribe is used for EVERY language (turbo: fast, multilingual).
 # model_translate is used only for -translate (English output); it must be a
-# large model — turbo cannot translate.
+# large model — turbo cannot translate. large-v3-turbo and large-v3 are pinned
+# to an exact, verified revision (from this project's mirror first); any other
+# name is fetched as its source currently offers it.
 model_transcribe=%s
 model_translate=%s
 
@@ -320,11 +326,14 @@ compute_type_lowmem=%s
 beam_size=%d
 
 [python]
-# Embedded Python runtime. python_version must be a full X.Y.Z that python.org
-# ships as an "embed-amd64" build. engine_spec is the pip package (pin it like
-# faster-whisper==1.0.3 to freeze a version). install_cuda pulls the CUDA wheels
-# so the GPU works without a system CUDA toolkit. Changing engine_spec re-runs
-# pip on the next start; delete the Python\ folder to rebuild from scratch.
+# With the defaults (python_version as shipped, engine_spec=faster-whisper)
+# SuperSubtitler installs its tested set: exact versions of Python, pip, the
+# engine, every package and the CUDA libraries, each checked against its
+# SHA-256 (built into the EXE). Change either value only if you know why:
+# then the newest versions are installed instead, NOT the tested set (pin
+# like faster-whisper==1.0.3 to freeze one yourself). install_cuda pulls the
+# CUDA libraries so the GPU works without a system CUDA toolkit. Delete the
+# Python\ folder to rebuild from scratch.
 python_version=%s
 engine_spec=%s
 install_cuda=%t

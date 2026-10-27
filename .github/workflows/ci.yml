@@ -29,7 +29,7 @@ jobs:
       # The EXE embeds its own source archive (go:embed); build.bat creates it.
       - name: pack embedded source
         run: |
-          $inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py') -contains $_.Extension }
+          $inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py','.json') -contains $_.Extension }
           Compress-Archive -Path $inc.FullName -DestinationPath SuperSubtitler_src.zip -Force
 
       # gofmt -l prints offenders and still exits 0; the output is the verdict.
@@ -56,6 +56,57 @@ jobs:
         run: |
           python -m py_compile transcribe.py
           python -m unittest -v transcribe_test
+
+  # The real thing, end to end on Windows: the built EXE installs its pinned
+  # runtime (FFmpeg, Python, pip, the exact packages - each hash-checked, the
+  # mirror first), then subtitles a test video and the text is checked.
+  # The tiny model and CPU keep it fast; install_cuda=false because the runner
+  # has no GPU. This is the check that would have caught the PyAV 19 break.
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        run: |
+          $inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py','.json') -contains $_.Extension }
+          Compress-Archive -Path $inc.FullName -DestinationPath SuperSubtitler_src.zip -Force
+          New-Item -ItemType Directory e2e | Out-Null
+          go build -o e2e\SuperSubtitler.exe .
+          Set-Content -Path e2e\SuperSubtitler_Config.ini -Value @(
+            'detect_model=tiny', 'model_transcribe=tiny', 'model_translate=tiny',
+            'device=cpu', 'compute_type=int8', 'compute_type_lowmem=int8', 'install_cuda=false')
+          Invoke-WebRequest https://raw.githubusercontent.com/openai/whisper/main/tests/jfk.flac -OutFile e2e\jfk.flac
+
+      - name: setup (pinned runtime)
+        working-directory: e2e
+        run: |
+          .\SuperSubtitler.exe -setup -json > setup.jsonl
+          $code = $LASTEXITCODE
+          Get-Content setup.jsonl | Select-String '"ev":"(error|summary)"'
+          if ($code -ne 0) { Write-Host "::error::-setup exited with $code"; exit 1 }
+          Write-Host "--- installed:"; Get-Content .ss_ffmpeg; Get-Content Python\.ss_ready
+          Get-ChildItem whisper\models\pinned
+
+      - name: subtitle a test video
+        working-directory: e2e
+        run: |
+          .\ffmpeg.exe -v error -y -f lavfi -i color=c=black:s=320x240:r=25 -i jfk.flac -shortest -c:v mpeg4 -c:a aac test.mkv
+          .\SuperSubtitler.exe -json -auto test.mkv > run.jsonl
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { Get-Content run.jsonl; Write-Host "::error::run exited with $code"; exit 1 }
+          $srt = Get-Content test.en.srt -Raw
+          Write-Host $srt
+          if ($srt -notmatch 'ask not what your country') { Write-Host "::error::the transcript is not what was said"; exit 1 }
+          if (-not (Test-Path test.subbed.mkv)) { Write-Host "::error::no .subbed.mkv"; exit 1 }
+          .\SuperSubtitler.exe -json -auto test.mkv > again.jsonl
+          if (-not (Select-String -Path again.jsonl -Pattern '"reason":"has_subs"' -Quiet)) { Write-Host "::error::a finished file was not skipped"; exit 1 }
 
   gui:
     runs-on: windows-latest
