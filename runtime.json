@@ -27,12 +27,12 @@
   },
   "ffmpeg": {
     "version": "8.1.2",
-    "file": "ffmpeg-8.1.2-essentials_build.zip",
-    "url": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip",
-    "size": 109728040,
-    "sha256": "db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec",
-    "mirror": false,
-    "license": "GPL-3.0 (gyan.dev essentials build)"
+    "file": "ffmpeg-8.1.2-supersubtitler-win64-lgpl.zip",
+    "url": "",
+    "size": 24602813,
+    "sha256": "bba1a9e4ed6565057ef3a032b0cd394ff795206df467bd45f99d6cd64bff3586",
+    "mirror": true,
+    "license": "LGPL-2.1-or-later (own build from the official source; sources in the mirror)"
   },
   "packages": [
     {

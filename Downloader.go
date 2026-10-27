@@ -82,8 +82,9 @@ func ffmpegIsPinned(dir string) bool {
 		markerMatches(filepath.Join(dir, ffmpegMarkerName), ffmpegMarker())
 }
 
-// downloadFFmpeg fetches the pinned FFmpeg build (checked against its SHA-256)
-// and extracts only ffmpeg.exe and ffprobe.exe into targetDir.
+// downloadFFmpeg fetches the pinned FFmpeg build — this project's own lean
+// LGPL build from the mirror (.github/scripts/build_ffmpeg.sh), checked
+// against its SHA-256 — and extracts only ffmpeg.exe and ffprobe.exe.
 func downloadFFmpeg(ctx context.Context, targetDir string) error {
 	label := "Downloading FFmpeg " + pins.FFmpeg.Version
 	spinner, _ := pterm.DefaultSpinner.WithText(label + "...").Start()
