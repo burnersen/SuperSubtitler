@@ -20,9 +20,9 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 
 <sub>🇩🇪 Auf Deutsch: [tech.burnersen.de/tools/supersubtitler](https://tech.burnersen.de/tools/supersubtitler/)</sub>
 
-<img src=".github/screenshot.png" alt="SuperSubtitler recognizing a 30-second English sample flawlessly" width="840">
+<img src=".github/screenshot.png" alt="The SuperSubtitlerGUI window translating a German film to English: the file with its language and live progress, the options on the right, SuperSubtitler's own log at the bottom" width="840">
 
-*A 30-second sample — recognized flawlessly, in English.*
+*SuperSubtitlerGUI at work: a German film being translated to English — progress per file and on the taskbar, every option one click away.*
 
 </div>
 

@@ -243,3 +243,24 @@ func TestCheckConfigFile(t *testing.T) {
 		t.Error("-checkconfig must never rewrite the file")
 	}
 }
+
+func TestDefaultConfigTextIsValidAndComplete(t *testing.T) {
+	text := defaultConfigText()
+	if p := settingsProblem(parseSettings(text)); p != "" {
+		t.Fatalf("the default INI does not pass its own check: %s", p)
+	}
+	if got := parseSettings(text); got != defaultSettings() {
+		t.Errorf("parsing the default INI does not give the defaults:\n%+v\n%+v", got, defaultSettings())
+	}
+	if !parseArgs([]string{"-printdefaults"}).printDefaults {
+		t.Error("-printdefaults not parsed")
+	}
+}
+
+func TestNewSettingLimits(t *testing.T) {
+	for _, bad := range []string{"vad_speech_pad_ms=-5", "sub_min_gap_ms=5000", "sub_gap_split_ms=0"} {
+		if settingsProblem(parseSettings(bad)) == "" {
+			t.Errorf("%s must be refused", bad)
+		}
+	}
+}

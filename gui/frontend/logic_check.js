@@ -157,4 +157,32 @@ check("language codes", () => {
   assert.strictEqual(L.languageName("ja"), "Japanese");
 });
 
+check("settings: allowed, recommended, mistakes", () => {
+  const num = { kind: "int", min: 30, max: 1800, recMin: 120, recMax: 300 };
+  assert.strictEqual(L.checkSetting(num, "180").level, "ok");
+  assert.strictEqual(L.checkSetting(num, "60").level, "warn");
+  assert.strictEqual(L.checkSetting(num, "5").level, "error");
+  assert.strictEqual(L.checkSetting(num, "abc").level, "error");
+  assert.strictEqual(L.checkSetting(num, "12.5").level, "error", "an int field must refuse decimals");
+  const flt = { kind: "float", min: 0, max: 1, recMin: 0.35, recMax: 0.6 };
+  assert.strictEqual(L.checkSetting(flt, "0.50").level, "ok");
+  assert.strictEqual(L.checkSetting(flt, "0,5").level, "error", "a comma is not a decimal point here");
+  assert.strictEqual(L.checkSetting(flt, "0.9").level, "warn");
+  const ch = { kind: "choice", choices: [{ value: "cuda" }, { value: "cpu" }] };
+  assert.strictEqual(L.checkSetting(ch, "cpu").level, "ok");
+  assert.strictEqual(L.checkSetting(ch, "gpu").level, "error");
+  assert.strictEqual(L.checkSetting(Object.assign({ open: true }, ch), "my-model").level, "warn");
+  assert.strictEqual(L.checkSetting({ kind: "bool" }, "yes").level, "error");
+  const expert = { kind: "text", expert: true };
+  assert.strictEqual(L.checkSetting(expert, "faster-whisper", "faster-whisper").level, "ok");
+  assert.strictEqual(L.checkSetting(expert, "faster-whisper==1.0.3", "faster-whisper").level, "warn");
+  assert.strictEqual(L.checkSetting(null, "anything").level, "ok", "unknown keys are not judged");
+});
+
+check("settings: rules across two values", () => {
+  assert.ok(L.crossCheck({ sub_min_dur_ms: "8000", sub_max_dur_ms: "7000" }).sub_min_dur_ms);
+  assert.deepStrictEqual(L.crossCheck({ sub_min_dur_ms: "833", sub_max_dur_ms: "7000", model_translate: "large-v3" }), {});
+  assert.ok(L.crossCheck({ model_translate: "large-v3-turbo" }).model_translate);
+});
+
 console.log("logic_check: " + passed + " checks passed");

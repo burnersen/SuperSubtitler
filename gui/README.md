@@ -37,8 +37,11 @@ Every decision about a file (language, timing, layout) stays in the CLI.
 - 🔊 **Split page** — the voice gets lost? Every channel of an audio track
   becomes its own WAV (`Movie.ch02.wav` …) to listen to; then pick that channel
   under **Audio channel** on the Subtitle page (`-split` / `-channel:N`).
-- ⚙️ **Settings page** built from `SuperSubtitler_Config.ini` itself, with the
-  file's own explanations. Before saving, the CLI checks the values
+- ⚙️ **Settings page** built from `SuperSubtitler_Config.ini` itself: every
+  value with a plain-words explanation, the recommended range and its
+  default (one click puts it back). Values outside the recommendation are
+  marked yellow, values SuperSubtitler would refuse red — those cannot be
+  saved. Changing an expert value (the tested runtime) asks first. Before saving, the CLI checks the values
   (`-checkconfig`): a value it would refuse is never written, so the file can
   no longer be reset to defaults by one typo. The previous file stays as `.bak`.
   The subtitle cleaner's term list is editable there too.

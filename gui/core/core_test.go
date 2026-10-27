@@ -5,9 +5,12 @@
 package core
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -191,8 +194,8 @@ func TestParseIni(t *testing.T) {
 	if !strings.HasPrefix(secs[0].Help, "Length and start") || !strings.Contains(secs[0].Help, "majority-voted") {
 		t.Errorf("section help = %q", secs[0].Help)
 	}
-	if secs[0].Keys[0].Help != "" || secs[0].Keys[0].Hint != "30 – 1800" {
-		t.Errorf("first key = %+v (its comment belongs to the section)", secs[0].Keys[0])
+	if k := secs[0].Keys[0]; k.Help != "" || k.Doc == nil || *k.Doc.Min != 30 {
+		t.Errorf("first key = %+v (its comment belongs to the section, its doc is known)", k)
 	}
 	if k := secs[1].Keys[1]; k.Key != "compute_type_lowmem" || k.Help != "only for -lowmem" {
 		t.Errorf("key help = %+v", k)
@@ -243,3 +246,103 @@ func TestUpdateDecision(t *testing.T) {
 		}
 	}
 }
+
+// Every key the CLI writes into its default INI must be explained, and no
+// explanation may describe a key that does not exist (Config.go is the CLI's
+// template — read from the repository so the two can never drift apart).
+func TestEveryCLISettingIsExplained(t *testing.T) {
+	src, err := os.ReadFile("../../Config.go")
+	if err != nil {
+		t.Skip("CLI sources not next to the window (", err, ")")
+	}
+	keys := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^([a-z_]+)=%`).FindAllStringSubmatch(string(src), -1) {
+		keys[m[1]] = true
+	}
+	if len(keys) < 20 {
+		t.Fatalf("found only %d keys in Config.go - did the template move?", len(keys))
+	}
+	for k := range keys {
+		if DocFor(k) == nil {
+			t.Errorf("setting %s has no explanation in keydocs.go", k)
+		}
+	}
+	for k := range keyDocs {
+		if !keys[k] {
+			t.Errorf("keydocs.go explains %s, which the CLI does not have", k)
+		}
+	}
+}
+
+func TestKeyDocsAreConsistent(t *testing.T) {
+	for k, d := range keyDocs {
+		if d.Title == "" || d.Help == "" || d.Advice == "" {
+			t.Errorf("%s: title, help and advice are all needed", k)
+		}
+		switch d.Kind {
+		case "int", "float":
+			if d.Min == nil || d.Max == nil || d.RecMin == nil || d.RecMax == nil {
+				t.Errorf("%s: numbers need hard limits and a recommended range", k)
+				continue
+			}
+			if *d.RecMin < *d.Min || *d.RecMax > *d.Max || *d.RecMin > *d.RecMax {
+				t.Errorf("%s: recommended %v..%v not inside %v..%v", k, *d.RecMin, *d.RecMax, *d.Min, *d.Max)
+			}
+			if d.Kind == "int" && (math.Trunc(*d.Min) != *d.Min || math.Trunc(*d.Max) != *d.Max) {
+				t.Errorf("%s: integer limits must be whole numbers", k)
+			}
+		case "choice":
+			if len(d.Choices) == 0 {
+				t.Errorf("%s: a choice needs choices", k)
+			}
+		case "bool", "text":
+		default:
+			t.Errorf("%s: unknown kind %q", k, d.Kind)
+		}
+	}
+}
+
+// The recommended values must include what the CLI ships with — otherwise a
+// fresh install would greet the user with warnings.
+func TestDefaultsAreRecommended(t *testing.T) {
+	defaults := map[string]string{
+		"detect_seconds": "180", "detect_start_percent": "10", "detect_model": "large-v3-turbo",
+		"model_transcribe": "large-v3-turbo", "model_translate": "large-v3", "device": "cuda",
+		"compute_type": "float16", "compute_type_lowmem": "int8", "beam_size": "5",
+		"vad_threshold": "0.50", "vad_speech_pad_ms": "400", "leadin_ms": "200",
+		"surround_mode": "center_emphasis", "sub_max_chars_per_line": "42", "sub_max_lines": "2",
+		"sub_max_cps": "17.0", "sub_min_dur_ms": "833", "sub_max_dur_ms": "7000",
+		"sub_min_gap_ms": "83", "sub_gap_split_ms": "500",
+	}
+	for k, v := range defaults {
+		d := DocFor(k)
+		switch d.Kind {
+		case "choice":
+			found := false
+			for _, c := range d.Choices {
+				found = found || c.Value == v
+			}
+			if !found {
+				t.Errorf("%s: default %s is not among the choices", k, v)
+			}
+		case "int", "float":
+			var n float64
+			if _, err := fmtSscan(v, &n); err != nil || n < *d.RecMin || n > *d.RecMax {
+				t.Errorf("%s: default %s outside recommended %v..%v", k, v, *d.RecMin, *d.RecMax)
+			}
+		}
+	}
+}
+
+func TestIniValuesAndDefaults(t *testing.T) {
+	defs := IniValues(sampleIni)
+	if defs["detect_seconds"] != "180" || defs["device"] != "cuda" {
+		t.Errorf("IniValues = %v", defs)
+	}
+	secs := WithDefaults(ParseIni("[detection]\ndetect_seconds=240\n"), defs)
+	if secs[0].Keys[0].Default != "180" || secs[0].Keys[0].Value != "240" {
+		t.Errorf("WithDefaults = %+v", secs[0].Keys[0])
+	}
+}
+
+func fmtSscan(s string, n *float64) (int, error) { return fmt.Sscan(s, n) }
