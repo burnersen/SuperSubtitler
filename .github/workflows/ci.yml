@@ -103,7 +103,9 @@ jobs:
           if ($code -ne 0) { Get-Content run.jsonl; Write-Host "::error::run exited with $code"; exit 1 }
           $srt = Get-Content test.en.srt -Raw
           Write-Host $srt
-          if ($srt -notmatch 'ask not what your country') { Write-Host "::error::the transcript is not what was said"; exit 1 }
+          # Line breaks depend on timing, not on what was said: compare the words only.
+          $words = ($srt -replace '(?m)^\d+\s*$', ' ' -replace '\d\d:\d\d:\d\d,\d+ --> \d\d:\d\d:\d\d,\d+', ' ' -replace '\s+', ' ')
+          if ($words -notmatch 'ask not what your country can do for you') { Write-Host "::error::the transcript is not what was said"; exit 1 }
           if (-not (Test-Path test.subbed.mkv)) { Write-Host "::error::no .subbed.mkv"; exit 1 }
           .\SuperSubtitler.exe -json -auto test.mkv > again.jsonl
           if (-not (Select-String -Path again.jsonl -Pattern '"reason":"has_subs"' -Quiet)) { Write-Host "::error::a finished file was not skipped"; exit 1 }
