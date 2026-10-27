@@ -1,5 +1,9 @@
 //go:build windows
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // cli.go — finding, checking and fetching SuperSubtitler.exe.
 //
 // The window and the CLI live in the same folder: the CLI keeps FFmpeg,

@@ -1,3 +1,7 @@
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // logic.js — the window's logic that needs no page: turning CLI events into
 // row states, answers into the exact line the CLI expects, colours into HTML.
 //

@@ -1,3 +1,7 @@
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // wiring_check.js — every element the window's script looks up must exist.
 // A typo in an id would otherwise only show up as a dead button in the window.
 const fs = require("fs");

@@ -1,5 +1,9 @@
 //go:build windows
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // app.go — everything the window can ask of Go. Each exported method of App
 // is callable from index.html (window.go.main.App.*).
 package main

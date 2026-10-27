@@ -5,6 +5,7 @@
 ### Drop a video, get clean subtitles back: automatic speech-to-subtitle, drag-and-drop.
 
 **Automatic subtitle generator with faster-whisper, for Windows. International, GPU-accelerated, one EXE.**
+*Free for everyone, at home or at work — open source under the [GPLv3](#-license).*
 Subtitles appear **only while someone is speaking** — no subtitles stuck on screen during silence.
 
 *Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and [FFmpeg](https://ffmpeg.org), which do the actual speech recognition and audio work. SuperSubtitler is the automation, language logic and safety layer around them.*
@@ -13,7 +14,7 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 [![GPU CUDA](https://img.shields.io/badge/GPU-CUDA%20%2B%20CPU%20fallback-76B900?logo=nvidia)](#-requirements)
 [![faster-whisper](https://img.shields.io/badge/engine-faster--whisper-blue)](https://github.com/SYSTRAN/faster-whisper)
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?logo=go)](#-building-from-source)
-[![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](#-license)
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](#-license)
 
 **[⬇️ Download the latest release](https://github.com/burnersen/SuperSubtitler/releases/latest)** · **[🌐 Website](https://tech.burnersen.de/en/tools/supersubtitler-en/)** · **[☕ Buy me a coffee](https://ko-fi.com/T5G0219GA6)**
 
@@ -190,15 +191,30 @@ Found a bug? Open an issue with the console output.
 
 ## ⚠️ Disclaimer
 
-SuperSubtitler is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See the *No Liability* clause of the [license](LICENSE.md).
+SuperSubtitler is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See sections 15 and 16 of the [license](LICENSE).
 
 ---
 
 ## 📜 License
 
-**SuperSubtitler is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md).**
+SuperSubtitler — the console tool and the window in [`gui/`](gui/) — is free software under the [GNU General Public License, version 3](LICENSE) — that version only (`GPL-3.0-only`).
 
-That means: free to use, study, modify and share for any **noncommercial** purpose — personal use, hobby, education, research. **Commercial use, resale or bundling into paid products is not permitted** without a separate license from the author. Want a commercial license? Open an issue or reach out.
+- **Use it:** Anyone may use SuperSubtitler free of charge, at home or at work, and read, change and share its source code.
+- **The one condition:** Whoever passes on SuperSubtitler or parts of it — unchanged, changed or built into a program of their own — must include the complete source code and pass everything on under the same license. A closed, paid product with SuperSubtitler inside is therefore not possible.
+- **Free of charge:** SuperSubtitler is and stays free. The official source is [github.com/burnersen/SuperSubtitler](https://github.com/burnersen/SuperSubtitler) — anyone asking money for SuperSubtitler is selling you what you can get here for free.
+- **A separate license for companies:** Want to build SuperSubtitler into a product that is not meant to be under the GPLv3? You can ask the author for a separate license — just [open an issue](https://github.com/burnersen/SuperSubtitler/issues).
+
+Versions up to and including 0.1.0 were released under the PolyForm Noncommercial License 1.0.0; from 0.2.0 on, SuperSubtitler is under the GPLv3.
+
+### Third-party components
+
+The exes are built with these Go libraries. Each keeps its own license, and all of them are compatible with the GPLv3:
+
+- **MIT License:** [pterm](https://github.com/pterm/pterm) with [atomicgo/cursor](https://github.com/atomicgo/cursor), [atomicgo/keyboard](https://github.com/atomicgo/keyboard) and [atomicgo/schedule](https://github.com/atomicgo/schedule), [gookit/color](https://github.com/gookit/color), [lithammer/fuzzysearch](https://github.com/lithammer/fuzzysearch), [mattn/go-runewidth](https://github.com/mattn/go-runewidth), [rivo/uniseg](https://github.com/rivo/uniseg), [xo/terminfo](https://github.com/xo/terminfo); for the window [Wails](https://github.com/wailsapp/wails) and its libraries
+- **Apache License 2.0:** [containerd/console](https://github.com/containerd/console)
+- **BSD 3-Clause License:** the [Go standard library](https://go.dev/LICENSE) and [golang.org/x/sys](https://github.com/golang/sys), [x/term](https://github.com/golang/term), [x/text](https://github.com/golang/text)
+
+Their copyright notices and full license texts are in the repositories linked above.
 
 ### Engines & attribution
 

@@ -1,3 +1,6 @@
+# SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+# Copyright (C) 2026 burnersen
+# SPDX-License-Identifier: GPL-3.0-only
 """Checks for transcribe.py that need neither faster-whisper nor PyAV.
 
 Run: python -m unittest transcribe_test

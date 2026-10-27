@@ -1,5 +1,9 @@
 //go:build windows
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // windowstate.go — size, place and theme of the window between starts.
 // Stored as SuperSubtitlerGUI.window next to the exe; nothing in the registry.
 package main

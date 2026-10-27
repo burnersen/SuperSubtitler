@@ -1,5 +1,9 @@
 //go:build windows
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // wincon.go — the hidden console and the clean stop.
 //
 // SuperSubtitler stops cleanly on Ctrl+C: the running engine and FFmpeg are

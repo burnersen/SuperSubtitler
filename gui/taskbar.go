@@ -1,7 +1,12 @@
 //go:build windows
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // taskbar.go — progress on the taskbar button, the percentage in the window
-// title, and a flash when a batch is done. Adapted from NVENCForgeGUI.
+// title, and a flash when a batch is done. Adapted from NVENCForgeGUI
+// (https://github.com/burnersen/NVENCForgeGUI, GPL-3.0-only, same author).
 //
 // ITaskbarList3 is a COM interface and must be used from one OS thread, so
 // every command goes through one goroutine that is locked to its thread.

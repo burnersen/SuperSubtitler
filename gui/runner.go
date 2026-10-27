@@ -1,5 +1,9 @@
 //go:build windows
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // runner.go — start one SuperSubtitler run, follow it, answer it, stop it.
 //
 // The CLI runs with -json: stdout carries one JSON event per line, stderr the

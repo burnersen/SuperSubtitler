@@ -1,5 +1,9 @@
 //go:build windows
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // SuperSubtitlerGUI — a window for SuperSubtitler.
 //
 // The window never transcribes anything itself. It starts the unchanged

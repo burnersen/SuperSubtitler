@@ -1,3 +1,7 @@
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package core holds the window's logic that does not need Windows: which
 // dropped files belong where, how a run's options become CLI arguments, how
 // the settings file is read and written back, and how a version is parsed.

@@ -1,3 +1,6 @@
+# SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+# Copyright (C) 2026 burnersen
+# SPDX-License-Identifier: GPL-3.0-only
 """Fill the mirror release (runtime.json -> mirror.tag) with every mirrored file.
 
 Each file is downloaded from its ORIGINAL source, checked against the SHA-256

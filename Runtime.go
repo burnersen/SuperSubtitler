@@ -1,5 +1,9 @@
 //go:build windows && amd64
 
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 package main
 
 // Runtime.go — the pinned runtime: exactly which Python, pip, FFmpeg, Python

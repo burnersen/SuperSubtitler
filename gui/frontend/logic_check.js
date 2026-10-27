@@ -1,3 +1,7 @@
+// SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+// Copyright (C) 2026 burnersen
+// SPDX-License-Identifier: GPL-3.0-only
+
 // logic_check.js — checks the window's logic (dist/logic.js) without a browser.
 // Run: node frontend/logic_check.js  — exits non-zero on the first failure.
 const assert = require("assert");
