@@ -30,7 +30,7 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 
 ## ⚡ 30 seconds, no manual
 
-1. Download `SuperSubtitler.exe`, a single file with nothing to install.
+1. Download `SuperSubtitler.exe`, a single file with nothing to install — and, if you prefer a window, `SuperSubtitlerGUI.exe` into the same folder.
 2. Drag a video or audio file (or a whole folder) onto it.
 3. Done. You get a `Movie.<lang>.srt` next to it **and** a `Movie.subbed.mkv` with the subtitle track built in.
 

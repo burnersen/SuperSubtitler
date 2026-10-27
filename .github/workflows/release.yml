@@ -1,0 +1,57 @@
+# SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
+# Copyright (C) 2026 burnersen
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Pushing a tag vX.Y.Z builds both exes on Windows from exactly that tag and
+# publishes them as the newest release, with .github/release/vX.Y.Z.md as the
+# text. The tag must match appVersion (main.go) and guiVersion (gui/main.go),
+# so a release can never carry an exe that names a different version.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: versions match the tag
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $cli = (Select-String -Path main.go -Pattern 'const appVersion = "(.+)"').Matches[0].Groups[1].Value
+          $gui = (Select-String -Path gui\main.go -Pattern 'const guiVersion = "(.+)"').Matches[0].Groups[1].Value
+          Write-Host "tag $tag, SuperSubtitler $cli, window $gui"
+          if ($cli -ne $tag -or $gui -ne $tag) { Write-Host "::error::versions do not match the tag"; exit 1 }
+          if (-not (Test-Path ".github\release\${{ github.ref_name }}.md")) { Write-Host "::error::no release notes"; exit 1 }
+
+      - name: build SuperSubtitler.exe
+        run: |
+          $inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py','.json') -contains $_.Extension -or $_.Name -eq 'LICENSE' }
+          Compress-Archive -Path $inc.FullName -DestinationPath SuperSubtitler_src.zip -Force
+          New-Item -ItemType Directory dist | Out-Null
+          go build -trimpath -ldflags="-s -w" -o dist\SuperSubtitler.exe .
+          .\dist\SuperSubtitler.exe -version
+
+      - name: build SuperSubtitlerGUI.exe
+        working-directory: gui
+        run: go build -trimpath -tags desktop,production -ldflags="-s -w -H windowsgui" -o ..\dist\SuperSubtitlerGUI.exe .
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Get-FileHash dist\*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+          gh release create "${{ github.ref_name }}" dist\SuperSubtitler.exe dist\SuperSubtitlerGUI.exe dist\SHA256SUMS.txt `
+            --title "SuperSubtitler ${{ github.ref_name }}" --notes-file ".github\release\${{ github.ref_name }}.md" --latest
