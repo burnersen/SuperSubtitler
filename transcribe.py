@@ -41,6 +41,39 @@ def _register_cuda_dlls():
             os.environ["PATH"] = b + os.pathsep + os.environ.get("PATH", "")
 
 
+def _patch_pyav_open():
+    """Keep faster-whisper working with PyAV 19 and newer.
+
+    faster-whisper (1.2.1 and older) decodes audio with
+    av.open(..., metadata_errors="ignore"), but allows any PyAV >= 11. PyAV 19
+    removed that keyword, so a fresh install picks up the newest PyAV and every
+    transcription dies with "open() got an unexpected keyword argument
+    'metadata_errors'". The keyword only tolerated broken metadata tags; our
+    input is a WAV this tool wrote itself, so dropping it changes nothing.
+    faster_whisper.audio looks av.open up at call time, so replacing the module
+    attribute is enough. Older PyAV keeps getting the keyword unchanged.
+    """
+    try:
+        import av
+    except ImportError:
+        return
+    original = av.open
+    if getattr(original, "_ss_compat", False):
+        return
+
+    def open_compat(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except TypeError as e:
+            if "metadata_errors" in kwargs and "metadata_errors" in str(e):
+                kwargs.pop("metadata_errors")
+                return original(*args, **kwargs)
+            raise
+
+    open_compat._ss_compat = True
+    av.open = open_compat
+
+
 def _bool(v):
     return str(v).strip().lower() in ("true", "1", "yes", "on")
 
@@ -148,6 +181,7 @@ def main():
         return
     args = parse_args()
     _register_cuda_dlls()
+    _patch_pyav_open()
     os.makedirs(args.output_dir, exist_ok=True)
     model = load_model(args)
     for wav in args.inputs:

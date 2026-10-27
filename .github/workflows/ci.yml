@@ -52,8 +52,10 @@ jobs:
       - name: go build
         run: go build -ldflags="-s -w" -o SuperSubtitler.exe .
 
-      - name: transcribe.py syntax
-        run: python -m py_compile transcribe.py
+      - name: transcribe.py syntax and tests
+        run: |
+          python -m py_compile transcribe.py
+          python -m unittest -v transcribe_test
 
   gui:
     runs-on: windows-latest
