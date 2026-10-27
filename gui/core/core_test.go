@@ -216,3 +216,26 @@ func TestApplyIniValuesKeepsLayout(t *testing.T) {
 		t.Error("a value with a line break must be refused")
 	}
 }
+
+func TestUpdateDecision(t *testing.T) {
+	cases := []struct {
+		installed, tag string
+		want           bool
+		msg            string
+	}{
+		{"0.2.0", "v0.1.0", false, "older than"}, // the bug: latest release older than what is there
+		{"", "v0.1.0", false, "older than"},      // nothing installed, but the release is too old anyway
+		{"0.2.0", "v0.2.0", false, "already the newest"},
+		{"0.3.0", "v0.2.1", false, "newer than the newest"},
+		{"0.2.0", "v0.2.1", true, ""},
+		{"", "v0.2.0", true, ""},
+		{"0.1.0", "v0.2.0", true, ""},
+		{"0.2.0", "nightly", false, "no readable version"},
+	}
+	for _, c := range cases {
+		got, msg := UpdateDecision(c.installed, c.tag)
+		if got != c.want || !strings.Contains(msg, c.msg) {
+			t.Errorf("UpdateDecision(%q, %q) = %v, %q", c.installed, c.tag, got, msg)
+		}
+	}
+}

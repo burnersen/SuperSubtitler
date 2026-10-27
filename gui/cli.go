@@ -42,6 +42,10 @@ type CLIStatus struct {
 	MinVersion    string `json:"minVersion"`
 	SetupComplete bool   `json:"setupComplete"`
 	Problem       string `json:"problem"`
+	// BackupVersion is the version of SuperSubtitler.exe.bak when that one is
+	// usable while the current one is not (too old, missing, broken) — the
+	// window then offers to put it back.
+	BackupVersion string `json:"backupVersion"`
 }
 
 func guiDir() string {
@@ -60,33 +64,73 @@ func fileExists(p string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// probeCLI asks the CLI for its version. stdin stays closed and the call is
-// time-bounded: an old CLI that does not know -version shows its help and
-// would wait for Enter — a closed input ends that wait at once.
+// probeCLI asks the CLI for its version, and looks at the backup copy when
+// the current one is not usable.
 func probeCLI() CLIStatus {
 	st := CLIStatus{Path: cliPath(), Dir: guiDir(), MinVersion: core.MinCLIVersion}
-	if !fileExists(st.Path) {
-		return st
+	if fileExists(st.Path) {
+		st.Found = true
+		v, err := exeVersion(st.Path)
+		switch {
+		case err != nil:
+			st.Problem = err.Error()
+		default:
+			st.Version = v
+			st.TooOld = !core.AtLeast(v, core.MinCLIVersion)
+		}
+		st.SetupComplete = setupLooksComplete(st.Dir)
 	}
-	st.Found = true
+	if !st.Found || st.TooOld || st.Problem != "" {
+		if fileExists(cliPath() + ".bak") {
+			if v, err := exeVersion(cliPath() + ".bak"); err == nil && core.AtLeast(v, core.MinCLIVersion) {
+				st.BackupVersion = v
+			}
+		}
+	}
+	return st
+}
+
+// exeVersion asks one SuperSubtitler.exe for its version. stdin stays closed
+// and the call is time-bounded: an old CLI that does not know -version shows
+// its help and would wait for Enter — a closed input ends that wait at once.
+func exeVersion(path string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, st.Path, "-version")
-	cmd.Dir = st.Dir
+	cmd := exec.CommandContext(ctx, path, "-version")
+	cmd.Dir = filepath.Dir(path)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
 	out, err := cmd.Output()
-	v, ok := core.ParseVersion(string(out))
-	switch {
-	case ok:
-		st.Version = v
-		st.TooOld = !core.AtLeast(v, core.MinCLIVersion)
-	case err != nil:
-		st.Problem = "could not start it: " + err.Error()
-	default:
-		st.Problem = "it did not report a version"
+	if v, ok := core.ParseVersion(string(out)); ok {
+		return v, nil
 	}
-	st.SetupComplete = setupLooksComplete(st.Dir)
-	return st
+	if err != nil {
+		return "", errors.New("could not start it: " + err.Error())
+	}
+	return "", errors.New("it did not report a version")
+}
+
+// restoreCLIBackup swaps SuperSubtitler.exe.bak back in (the current exe
+// becomes the .bak, so the swap can be undone the same way).
+func restoreCLIBackup() (CLIStatus, error) {
+	bak := cliPath() + ".bak"
+	if !fileExists(bak) {
+		return probeCLI(), errors.New("there is no SuperSubtitler.exe.bak to restore")
+	}
+	tmp := cliPath() + ".swap"
+	_ = os.Remove(tmp)
+	if fileExists(cliPath()) {
+		if err := os.Rename(cliPath(), tmp); err != nil {
+			return probeCLI(), fmt.Errorf("could not move the current exe aside: %w", err)
+		}
+	}
+	if err := os.Rename(bak, cliPath()); err != nil {
+		_ = os.Rename(tmp, cliPath())
+		return probeCLI(), fmt.Errorf("could not restore the backup: %w", err)
+	}
+	if fileExists(tmp) {
+		_ = os.Rename(tmp, bak)
+	}
+	return probeCLI(), nil
 }
 
 // setupLooksComplete checks the markers the CLI leaves after its one-time
@@ -109,70 +153,83 @@ func setupLooksComplete(dir string) bool {
 var httpClient = &http.Client{Timeout: 10 * time.Minute}
 
 // downloadCLI fetches SuperSubtitler.exe from the latest GitHub release and
-// puts it next to the window. An existing exe is kept as .bak, so there is
-// always a way back.
+// puts it next to the window — but only when that release is newer than what
+// is there and new enough for this window (core.UpdateDecision). The previous
+// exe is kept as .bak, and put back at once if the new one does not work.
 func downloadCLI() (CLIStatus, error) {
+	before := probeCLI()
 	req, err := http.NewRequest(http.MethodGet, latestReleaseAPI, nil)
 	if err != nil {
-		return CLIStatus{}, err
+		return before, err
 	}
 	req.Header.Set("User-Agent", "SuperSubtitlerGUI")
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return CLIStatus{}, fmt.Errorf("asking GitHub for the latest release failed: %w", err)
+		return before, fmt.Errorf("asking GitHub for the latest release failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return CLIStatus{}, fmt.Errorf("GitHub answered HTTP %d", resp.StatusCode)
+		return before, fmt.Errorf("GitHub answered HTTP %d", resp.StatusCode)
 	}
 	var rel core.Release
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&rel); err != nil {
-		return CLIStatus{}, fmt.Errorf("reading the release failed: %w", err)
+		return before, fmt.Errorf("reading the release failed: %w", err)
+	}
+	installed := ""
+	if before.Found && before.Problem == "" {
+		installed = before.Version
+	}
+	if ok, why := core.UpdateDecision(installed, rel.Tag); !ok {
+		return before, errors.New(why)
 	}
 	url, ok := rel.AssetURL(cliFileName)
 	if !ok {
-		return CLIStatus{}, fmt.Errorf("release %s has no %s", rel.Tag, cliFileName)
+		return before, fmt.Errorf("release %s has no %s", rel.Tag, cliFileName)
 	}
 
 	dl, err := httpClient.Get(url)
 	if err != nil {
-		return CLIStatus{}, fmt.Errorf("download failed: %w", err)
+		return before, fmt.Errorf("download failed: %w", err)
 	}
 	defer dl.Body.Close()
 	if dl.StatusCode != http.StatusOK {
-		return CLIStatus{}, fmt.Errorf("download answered HTTP %d", dl.StatusCode)
+		return before, fmt.Errorf("download answered HTTP %d", dl.StatusCode)
 	}
 	tmp := cliPath() + ".download"
 	f, err := os.Create(tmp)
 	if err != nil {
-		return CLIStatus{}, err
+		return before, err
 	}
 	if _, err := io.Copy(f, dl.Body); err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return CLIStatus{}, fmt.Errorf("download failed: %w", err)
+		return before, fmt.Errorf("download failed: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
-		return CLIStatus{}, err
+		return before, err
+	}
+	// Check the new exe BEFORE it replaces anything.
+	if v, err := exeVersion(tmp); err != nil || !core.AtLeast(v, core.MinCLIVersion) {
+		os.Remove(tmp)
+		if err != nil {
+			return before, fmt.Errorf("the downloaded SuperSubtitler.exe does not work (%v) — your current one was left as it is", err)
+		}
+		return before, fmt.Errorf("the downloaded SuperSubtitler.exe is %s, too old for this window — your current one was left as it is", v)
 	}
 	if fileExists(cliPath()) {
 		_ = os.Remove(cliPath() + ".bak")
 		if err := os.Rename(cliPath(), cliPath()+".bak"); err != nil {
 			os.Remove(tmp)
-			return CLIStatus{}, fmt.Errorf("could not move the old exe aside: %w", err)
+			return before, fmt.Errorf("could not move the old exe aside: %w", err)
 		}
 	}
 	if err := os.Rename(tmp, cliPath()); err != nil {
-		return CLIStatus{}, err
+		_ = os.Rename(cliPath()+".bak", cliPath())
+		return probeCLI(), err
 	}
-	st := probeCLI()
-	if st.TooOld {
-		return st, errors.New("the latest release (" + st.Version + ") is older than " + core.MinCLIVersion +
-			", which this window needs — a newer SuperSubtitler release is required")
-	}
-	return st, nil
+	return probeCLI(), nil
 }
 
 // checkConfigText lets the CLI judge new settings before they are written:

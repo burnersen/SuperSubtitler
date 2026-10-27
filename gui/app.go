@@ -121,6 +121,14 @@ func (a *App) DownloadCLI() (CLIStatus, error) {
 	return downloadCLI()
 }
 
+// RestoreCLIBackup puts SuperSubtitler.exe.bak back in place.
+func (a *App) RestoreCLIBackup() (CLIStatus, error) {
+	if a.runner.Running() {
+		return probeCLI(), errors.New("not while a run is in progress")
+	}
+	return restoreCLIBackup()
+}
+
 func (a *App) SaveTheme(theme string) error {
 	a.window.Theme = normaliseTheme(theme)
 	s, ok := loadWindowState()

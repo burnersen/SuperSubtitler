@@ -540,17 +540,26 @@ function renderBanner() {
   const cli = state.cli;
   if (!cli) { b.hidden = true; return; }
   let cls = "", text = "", button = "";
-  if (!cli.found) {
+  const restore = cli.backupVersion
+    ? '<button class="btn primary" data-act="restore">Restore SuperSubtitler ' + L.escapeHtml(cli.backupVersion) + "</button>"
+    : "";
+  if (!cli.found && cli.backupVersion) {
+    cls = "bad";
+    text = "<b>SuperSubtitler.exe is missing</b>, but the previous version " + L.escapeHtml(cli.backupVersion) + " is still there as a backup.";
+    button = restore;
+  } else if (!cli.found) {
     cls = "bad";
     text = "<b>SuperSubtitler.exe is not next to this window.</b> One click fetches the latest release from GitHub.";
     button = '<button class="btn primary" data-act="download">Get SuperSubtitler</button>';
   } else if (cli.tooOld) {
     cls = "bad";
-    text = "<b>SuperSubtitler " + L.escapeHtml(cli.version) + " is too old for this window</b> (needs " + L.escapeHtml(cli.minVersion) + " or newer).";
-    button = '<button class="btn primary" data-act="download">Update SuperSubtitler</button>';
+    text = "<b>SuperSubtitler " + L.escapeHtml(cli.version) + " is too old for this window</b> (needs " + L.escapeHtml(cli.minVersion) + " or newer)." +
+      (cli.backupVersion ? " Your previous version " + L.escapeHtml(cli.backupVersion) + " is still there as a backup — one click puts it back." : "");
+    button = restore || '<button class="btn primary" data-act="download">Update SuperSubtitler</button>';
   } else if (cli.problem) {
     cls = "bad";
     text = "<b>SuperSubtitler.exe does not answer:</b> " + L.escapeHtml(cli.problem);
+    button = restore;
   } else if (!cli.setupComplete) {
     cls = "warn";
     text = "<b>One-time setup still to do.</b> FFmpeg, a self-contained Python, the Whisper engine and a speech model (a few GB) are downloaded once. It also happens on its own at the first Start.";
@@ -560,7 +569,13 @@ function renderBanner() {
   b.innerHTML = "<p>" + text + "</p>" + button;
   b.hidden = false;
   const btn = b.querySelector("button");
-  if (btn) btn.onclick = () => (btn.dataset.act === "download" ? downloadCLI() : startSetup(false));
+  if (btn) {
+    btn.onclick = () => {
+      if (btn.dataset.act === "download") downloadCLI();
+      else if (btn.dataset.act === "restore") restoreCLI();
+      else startSetup(false);
+    };
+  }
 }
 
 async function refreshCLI() {
@@ -569,20 +584,33 @@ async function refreshCLI() {
   if (state.page === "about") renderAbout();
 }
 
+async function restoreCLI() {
+  try {
+    state.cli = await App().RestoreCLIBackup();
+    toast("SuperSubtitler " + (state.cli.version || "") + " is back in place.");
+  } catch (e) {
+    toast(errText(e), true);
+    await refreshCLI();
+  }
+  renderBanner();
+  renderAbout();
+}
+
 async function downloadCLI() {
   const note = $("about-note");
   note.className = "note";
-  note.textContent = "Downloading SuperSubtitler.exe …";
-  toast("Downloading SuperSubtitler.exe from GitHub …");
+  note.textContent = "Checking the newest release …";
   try {
     state.cli = await App().DownloadCLI();
     note.className = "note ok";
     note.textContent = "SuperSubtitler " + state.cli.version + " is in place.";
     toast("SuperSubtitler " + state.cli.version + " is in place.");
   } catch (e) {
-    note.className = "note bad";
+    // "Already the newest" is information, not a failure.
+    const info = /already the newest|newer than the newest|nothing to update|left as it is/.test(errText(e));
+    note.className = "note" + (info ? "" : " bad");
     note.textContent = errText(e);
-    toast(errText(e), true);
+    toast(errText(e), !info);
     await refreshCLI();
   }
   renderBanner();

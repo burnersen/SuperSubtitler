@@ -50,6 +50,37 @@ func splitVersion(v string) [3]int {
 	return out
 }
 
+// ReleaseVersion reads the version from a release tag ("v0.2.0" -> "0.2.0").
+func ReleaseVersion(tag string) (string, bool) {
+	v := strings.TrimPrefix(strings.TrimSpace(tag), "v")
+	if !bareVersion.MatchString(v) {
+		return "", false
+	}
+	return v, true
+}
+
+// UpdateDecision says whether the newest release should replace the
+// installed CLI (installed "" = none or unknown). An update never goes
+// backwards and never installs a CLI too old for this window: the
+// "latest release" on GitHub can be older than a build the user already has.
+func UpdateDecision(installed, releaseTag string) (bool, string) {
+	rel, ok := ReleaseVersion(releaseTag)
+	if !ok {
+		return false, "the newest release (" + releaseTag + ") has no readable version number"
+	}
+	if !AtLeast(rel, MinCLIVersion) {
+		return false, "the newest release on GitHub is " + rel + ", older than the " + MinCLIVersion +
+			" this window needs — your current SuperSubtitler.exe was left as it is"
+	}
+	if installed != "" && AtLeast(installed, rel) {
+		if installed == rel {
+			return false, "SuperSubtitler " + installed + " is already the newest release"
+		}
+		return false, "your SuperSubtitler " + installed + " is newer than the newest release (" + rel + ") — nothing to update"
+	}
+	return true, ""
+}
+
 // Release is the part of GitHub's "latest release" answer the window uses.
 type Release struct {
 	Tag    string `json:"tag_name"`
