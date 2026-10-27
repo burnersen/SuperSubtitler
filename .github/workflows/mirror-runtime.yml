@@ -1,5 +1,6 @@
 # Fills the mirror release with the exact runtime files SuperSubtitler
-# installs (runtime.json): embedded Python, pip and the speech models.
+# installs (runtime.json): embedded Python, pip, every Python wheel, the
+# speech models - and FFmpeg, which this project builds itself (job ffmpeg).
 # SuperSubtitler downloads from there first, so a renamed or deleted upstream
 # repository can never break an install. Safe to run again at any time:
 # files already mirrored are skipped. Runs on its own whenever runtime.json
@@ -12,6 +13,7 @@ on:
     paths:
       - runtime.json
       - .github/scripts/mirror_runtime.py
+      - .github/scripts/build_ffmpeg.sh
       - .github/workflows/mirror-runtime.yml
 
 permissions:
@@ -22,7 +24,51 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Builds the lean LGPL FFmpeg from the official sources (build_ffmpeg.sh)
+  # and puts it into the mirror together with exactly those sources. Only when
+  # it is not there yet: a build that runtime.json pins by its SHA-256 must
+  # never be replaced. To build a new FFmpeg version, change FF_VERSION in the
+  # script; the new file name lets it build, then pin its hash in runtime.json.
+  ffmpeg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: already in the mirror?
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/mirror_runtime.py --ensure-release
+          ver=$(grep -m1 '^FF_VERSION=' .github/scripts/build_ffmpeg.sh | cut -d= -f2)
+          name="ffmpeg-${ver}-supersubtitler-win64-lgpl.zip"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          if gh release view "$(python3 -c "import json;print(json.load(open('runtime.json'))['mirror']['tag'])")" --json assets -q '.assets[].name' | grep -qx "$name"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"; echo "$name is already in the mirror - not rebuilt."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: build
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-mingw-w64-x86-64 nasm zip
+          .github/scripts/build_ffmpeg.sh "$RUNNER_TEMP/ffbuild" "$RUNNER_TEMP/ffout"
+      - name: upload
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(python3 -c "import json;print(json.load(open('runtime.json'))['mirror']['tag'])")
+          cp .github/scripts/build_ffmpeg.sh "$RUNNER_TEMP/ffout/build_ffmpeg.sh"
+          gh release upload "$tag" "$RUNNER_TEMP"/ffout/* --clobber
+          echo '### FFmpeg build' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          (cd "$RUNNER_TEMP/ffout" && stat -c '%s %n' * && sha256sum *) >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
   mirror:
+    needs: ffmpeg
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:

@@ -32,8 +32,11 @@ func TestRuntimeManifestIsComplete(t *testing.T) {
 		t.Errorf("parts must stay below GitHub's 2 GiB asset limit: %+v", m.Mirror)
 	}
 	for _, f := range []pinnedFile{m.Python, m.Pip, m.FFmpeg} {
-		if f.File == "" || !strings.HasPrefix(f.URL, "https://") || f.Size <= 0 || !hex64.MatchString(f.SHA256) || f.Version == "" {
+		if f.File == "" || f.Size <= 0 || !hex64.MatchString(f.SHA256) || f.Version == "" {
 			t.Errorf("incomplete pin: %+v", f)
+		}
+		if !strings.HasPrefix(f.URL, "https://") && !(f.URL == "" && f.Mirror) {
+			t.Errorf("%s needs an original URL, or must live in the mirror: %+v", f.File, f)
 		}
 	}
 	if !strings.HasPrefix(m.Python.File, "python-"+m.Python.Version+"-embed-amd64") {
@@ -44,7 +47,7 @@ func TestRuntimeManifestIsComplete(t *testing.T) {
 	}
 	names := map[string]bool{}
 	for _, p := range m.Packages {
-		if p.Name == "" || p.Version == "" || !hex64.MatchString(p.SHA256) || !strings.HasSuffix(p.File, ".whl") {
+		if p.Name == "" || p.Version == "" || p.Size <= 0 || !hex64.MatchString(p.SHA256) || !strings.HasSuffix(p.File, ".whl") {
 			t.Errorf("incomplete package pin: %+v", p)
 		}
 		if names[strings.ToLower(p.Name)] {
@@ -66,6 +69,17 @@ func TestRuntimeManifestIsComplete(t *testing.T) {
 	}
 	add(m.Python.File)
 	add(m.Pip.File)
+	if m.FFmpeg.Mirror {
+		add(m.FFmpeg.File)
+	}
+	if !m.PackagesMirror {
+		t.Error("the wheels are meant to be mirrored too")
+	}
+	for _, p := range m.Packages {
+		for _, a := range m.partNames(p.File, p.Size) {
+			add(a)
+		}
+	}
 	for _, model := range []string{"large-v3-turbo", "large-v3"} {
 		pm, ok := m.Models[model]
 		if !ok {
@@ -116,6 +130,9 @@ func TestPartNamesAndSources(t *testing.T) {
 	}
 	if src := pins.sourcesFor("f.zip", "https://x.org/f.zip", 10, false); len(src) != 1 || src[0].name != "x.org" {
 		t.Errorf("unmirrored file must come from its source only: %+v", src)
+	}
+	if src := pins.sourcesFor("own.zip", "", 10, true); len(src) != 1 || src[0].name != "mirror" {
+		t.Errorf("a file without original URL comes from the mirror only: %+v", src)
 	}
 }
 

@@ -379,7 +379,31 @@ func installEngine(ctx context.Context, pyExe string, pinned bool) error {
 		}
 		return nil
 	}
+	// Pinned: every wheel is fetched by SuperSubtitler itself — mirror first,
+	// PyPI second, each checked against its SHA-256 — into a temporary folder,
+	// and pip installs only from there (--no-index): it never asks PyPI on its
+	// own, and --require-hashes still refuses anything not in the list.
+	wheels, err := os.MkdirTemp("", "ss-wheels-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(wheels)
 	install := func(step, label string, cuda bool) error {
+		pkgs := pins.packagesFor(cuda)
+		var total int64
+		for _, p := range pkgs {
+			total += p.Size
+		}
+		currentSpinner.Store(spinner)
+		defer currentSpinner.Store(nil)
+		emitSetup(step, "start", fmt.Sprintf("%s — downloading %d packages (%.0f MB)", label, len(pkgs), float64(total)/bytesPerMB), 0, float64(total)/bytesPerMB, 0)
+		for i, p := range pkgs {
+			plabel := fmt.Sprintf("%s — package %d/%d: %s %s", label, i+1, len(pkgs), p.Name, p.Version)
+			if err := downloadPinned(ctx, step, plabel, filepath.Join(wheels, p.File), p.Size, p.SHA256,
+				pins.sourcesFor(p.File, p.URL, p.Size, pins.PackagesMirror)); err != nil {
+				return err
+			}
+		}
 		req, err := os.CreateTemp("", "ss-requirements-*.txt")
 		if err != nil {
 			return err
@@ -390,7 +414,8 @@ func installEngine(ctx context.Context, pyExe string, pinned bool) error {
 			return err
 		}
 		req.Close()
-		return runPip(ctx, pyExe, spinner, step, label, "--require-hashes", "--only-binary=:all:", "-r", req.Name())
+		return runPip(ctx, pyExe, spinner, step, label, "--no-index", "--find-links", wheels,
+			"--require-hashes", "--only-binary=:all:", "-r", req.Name())
 	}
 	if err := install("engine", "Installing whisper engine (tested set)", false); err != nil {
 		return fmt.Errorf("Downloader.go: installEngine (pinned packages): %w", err)

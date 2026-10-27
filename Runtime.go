@@ -57,6 +57,7 @@ type pinnedPackage struct {
 	Version string `json:"version"`
 	File    string `json:"file"`
 	URL     string `json:"url"`
+	Size    int64  `json:"size"`
 	SHA256  string `json:"sha256"`
 	CUDA    bool   `json:"cuda"`
 }
@@ -82,11 +83,13 @@ type runtimeManifest struct {
 		SplitOver int64  `json:"split_over"`
 		PartSize  int64  `json:"part_size"`
 	} `json:"mirror"`
-	Python   pinnedFile             `json:"python"`
-	Pip      pinnedFile             `json:"pip"`
-	FFmpeg   pinnedFile             `json:"ffmpeg"`
-	Packages []pinnedPackage        `json:"packages"`
-	Models   map[string]pinnedModel `json:"models"`
+	Python   pinnedFile      `json:"python"`
+	Pip      pinnedFile      `json:"pip"`
+	FFmpeg   pinnedFile      `json:"ffmpeg"`
+	Packages []pinnedPackage `json:"packages"`
+	// PackagesMirror: the wheels are in the mirror too (asset = wheel name).
+	PackagesMirror bool                   `json:"packages_mirror"`
+	Models         map[string]pinnedModel `json:"models"`
 }
 
 // pins is parsed once; a broken embedded file is a build error, caught by the
@@ -136,7 +139,8 @@ type downloadSource struct {
 	urls []string
 }
 
-// sourcesFor lists where a file is fetched from, mirror first.
+// sourcesFor lists where a file is fetched from, mirror first. A file without
+// an original URL exists only in the mirror (the FFmpeg this project builds).
 func (m *runtimeManifest) sourcesFor(asset, original string, size int64, mirrored bool) []downloadSource {
 	var out []downloadSource
 	if mirrored && m.Mirror.Repo != "" && m.Mirror.Tag != "" {
@@ -145,6 +149,9 @@ func (m *runtimeManifest) sourcesFor(asset, original string, size int64, mirrore
 			urls = append(urls, m.mirrorURL(p))
 		}
 		out = append(out, downloadSource{name: "mirror", urls: urls})
+	}
+	if original == "" {
+		return out
 	}
 	host := original
 	if i := strings.Index(host, "://"); i >= 0 {
@@ -173,6 +180,17 @@ func (m *runtimeManifest) requirementsText(cuda bool) string {
 		fmt.Fprintf(&b, "%s==%s --hash=sha256:%s\n", p.Name, p.Version, p.SHA256)
 	}
 	return b.String()
+}
+
+// packagesFor lists the pinned wheels of one group (core or CUDA).
+func (m *runtimeManifest) packagesFor(cuda bool) []pinnedPackage {
+	var out []pinnedPackage
+	for _, p := range m.Packages {
+		if p.CUDA == cuda {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // lockID identifies the exact installed set (packages, CUDA or not, Python).

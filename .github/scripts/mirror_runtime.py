@@ -43,12 +43,17 @@ def part_names(asset, size):
 
 
 def wanted():
-    """(asset name, original url, size, sha256) of every mirrored file."""
+    """(asset name, original url, size, sha256) of every mirrored file. An
+    empty url marks a file this project builds itself (FFmpeg): it is not
+    downloaded here, only checked for presence."""
     items = []
     for key in ("python", "pip", "ffmpeg"):
         f = MANIFEST[key]
         if f.get("mirror"):
-            items.append((f["file"], f["url"], f["size"], f["sha256"]))
+            items.append((f["file"], f.get("url", ""), f["size"], f["sha256"]))
+    if MANIFEST.get("packages_mirror"):
+        for p in MANIFEST["packages"]:
+            items.append((p["file"], p["url"], p["size"], p["sha256"]))
     for name, m in MANIFEST["models"].items():
         if not m.get("mirror"):
             continue
@@ -67,21 +72,25 @@ def notes():
         "| File | Version | Source | Licence |",
         "|---|---|---|---|",
     ]
-    for key in ("python", "pip"):
+    for key in ("python", "pip", "ffmpeg"):
         f = MANIFEST[key]
-        lines.append("| %s | %s | %s | %s |" % (f["file"], f["version"], f["url"], f.get("license", "")))
+        if f.get("mirror"):
+            lines.append("| %s | %s | %s | %s |" % (f["file"], f["version"], f.get("url") or "built here, see BUILD.txt in the zip", f.get("license", "")))
+    if MANIFEST.get("packages_mirror"):
+        lines.append("| %d Python wheels (*.whl) | pinned | https://pypi.org | each wheel's own licence (MIT, BSD, Apache-2.0, PSF; NVIDIA CUDA libraries under the NVIDIA Software License, which allows redistribution with applications) |" % len(MANIFEST["packages"]))
     for name, m in MANIFEST["models"].items():
         lines.append("| %s--* | revision %s | https://huggingface.co/%s | %s |" % (name, m["revision"][:12], m["repo"], m.get("license", "")))
     lines += [
         "",
         "Whisper model weights (c) OpenAI, MIT licence; CTranslate2 conversions by SYSTRAN and Mobius Labs/Dropbox, MIT licence.",
         "Python (c) Python Software Foundation, PSF licence. pip: MIT licence.",
+        "FFmpeg: own LGPL build from the unmodified sources ffmpeg-<version>.tar.xz and zlib-<version>.tar.gz, which are in this release too (build script: .github/scripts/build_ffmpeg.sh).",
         "Files larger than 2 GB are split into .partNN pieces; SuperSubtitler joins them while downloading.",
     ]
     return "\n".join(lines)
 
 
-def main():
+def ensure_release():
     try:
         gh("release", "view", TAG, "--json", "tagName", capture=True)
     except subprocess.CalledProcessError:
@@ -92,6 +101,10 @@ def main():
         gh("release", "create", TAG, "--title", "Runtime files (mirror) " + TAG,
            "--notes-file", path, "--prerelease", "--latest=false",
            "--target", os.environ.get("GITHUB_SHA", "HEAD"))
+
+
+def main():
+    ensure_release()
     present = {a["name"]: a["size"] for a in json.loads(gh("release", "view", TAG, "--json", "assets", capture=True))["assets"]}
 
     for asset, url, size, sha in wanted():
@@ -99,6 +112,9 @@ def main():
         if all(present.get(name) == n for name, _, n in parts):
             print("ok   %s (already mirrored)" % asset, flush=True)
             continue
+        if not url:
+            sys.exit("MISSING %s: it is built by this project (job 'ffmpeg') and is not in the release with "
+                     "the size runtime.json expects (%d bytes)" % (asset, size))
         local = os.path.join(WORK, asset)
         print("get  %s <- %s" % (asset, url), flush=True)
         h = hashlib.sha256()
@@ -136,4 +152,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--ensure-release"]:
+        ensure_release()
+    else:
+        main()
