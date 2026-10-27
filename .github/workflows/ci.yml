@@ -54,3 +54,56 @@ jobs:
 
       - name: transcribe.py syntax
         run: python -m py_compile transcribe.py
+
+  gui:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: gui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gui/go.mod
+          cache: true
+          cache-dependency-path: gui/go.sum
+
+      # There is no npm and no bundler - the window is index.html + logic.js.
+      # Node is only here to run the checks of its script.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: gofmt
+        run: |
+          $unformatted = gofmt -l .
+          if ($unformatted) {
+            Write-Host "::error::These files are not gofmt-clean:"
+            $unformatted | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      # The same tags "wails build" sets; without them the exe refuses to start.
+      - name: go build
+        run: go build -tags desktop,production -ldflags="-s -w -H windowsgui" -o SuperSubtitlerGUI.exe .
+
+      # The guard on an empty list matters: renamed checks must not turn this
+      # step into one that is green while checking nothing.
+      - name: window checks
+        run: |
+          $checks = Get-ChildItem -Path frontend\*_check.js | Sort-Object Name
+          if (-not $checks) { Write-Host "::error::No frontend\*_check.js found."; exit 1 }
+          $failed = @()
+          foreach ($check in $checks) {
+            Write-Host "--- $($check.Name)"
+            node $check.FullName
+            if ($LASTEXITCODE -ne 0) { $failed += $check.Name }
+          }
+          if ($failed) { Write-Host "::error::Failed: $($failed -join ', ')"; exit 1 }

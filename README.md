@@ -51,6 +51,12 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 
 ---
 
+## 🖥️ Prefer a window?
+
+**SuperSubtitlerGUI** (in [`gui/`](gui/README.md)) puts all of this behind buttons: drag and drop, tick boxes for audio tracks, one-click language questions, live progress per file and on the taskbar, a Merge page, and a Settings page built from the config file itself. It drives the unchanged `SuperSubtitler.exe` — same engine, same results.
+
+---
+
 ## 🗣️ Language handling
 
 - **Default:** the spoken language of each track is detected (a sample is taken, split into windows and majority-voted) and the subtitles are written **in that language**.
@@ -86,6 +92,7 @@ Drag files or folders onto the EXE, or pass them as arguments. Flags and files m
 | `-out:FOLDER` | Write the `.srt`/`.mkv` results into FOLDER instead of next to the source |
 | `-nowait` | Don't wait for Enter at the end (for scripts and shortcuts) |
 | `-setup` | Download and install everything, speech models included, then exit |
+| `-nomerge` | Never offer the merge mode; subtitle every dropped file |
 | `-json` | Machine-readable events on stdout, one JSON line each (for front-ends) |
 | `-version` | Print the version and exit |
 | `-help` | Show the banner and full options list |
@@ -141,6 +148,8 @@ If SmartScreen blocks the start: click **"More info" → "Run anyway"**.
 ```
 build.bat
 ```
+
+The window lives in `gui/` and has its own `gui/build.bat` (writes `SuperSubtitlerGUI.exe` next to `SuperSubtitler.exe`).
 
 `build.bat` packs the embedded source archive, runs `go mod tidy` and compiles `SuperSubtitler.exe` (Go 1.22+). The only external dependency is [pterm](https://github.com/pterm/pterm). The EXE is written to the parent folder, ready to run next to its downloaded FFmpeg/Python/models. Every released EXE also extracts its own sources on first run.
 

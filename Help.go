@@ -73,6 +73,8 @@ OPTIONS
   -setup           Download and install everything (including
                    the speech models) and exit. Useful to get
                    the one-time setup out of the way.
+  -nomerge         Never offer the merge mode; subtitle every
+                   dropped file.
   -json            Machine-readable progress for front-ends
                    (one JSON event per line on standard output).
   -version         Print the version number and exit.

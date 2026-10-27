@@ -4,3 +4,7 @@ SuperSubtitler_src.zip
 
 # Local Go workspace files
 /vendor/
+
+# GUI build output and the window's remembered size/theme
+gui/build/bin/
+SuperSubtitlerGUI.window

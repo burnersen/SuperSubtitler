@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "SuperSubtitlerGUI",
+  "outputfilename": "SuperSubtitlerGUI",
+  "frontend:install": "",
+  "frontend:build": "",
+  "author": {
+    "name": "burnersen"
+  },
+  "info": {
+    "companyName": "burnersen",
+    "productName": "SuperSubtitlerGUI",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright 2026 burnersen",
+    "comments": "A window for SuperSubtitler"
+  }
+}
