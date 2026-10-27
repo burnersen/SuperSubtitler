@@ -27,10 +27,10 @@ type AppSettings struct {
 	modelTranslate  string // -translate path (English output); turbo cannot translate
 
 	// Engine runtime
-	device           string // "cuda" (GPU, CPU fallback) or "cpu"
-	computeType      string // float16 on GPU
+	device            string // "cuda" (GPU, CPU fallback) or "cpu"
+	computeType       string // float16 on GPU
 	computeTypeLowMem string // int8 etc. for -lowmem
-	beamSize         int
+	beamSize          int
 
 	// Python runtime
 	pythonVersion string // embeddable Python version to fetch (X.Y.Z)
@@ -38,9 +38,9 @@ type AppSettings struct {
 	installCUDA   bool   // pip-install the CUDA wheels so the GPU path works out of the box
 
 	// VAD / anti-hallucination
-	vadFilter        bool
-	vadThreshold     float64
-	vadSpeechPadMs   int
+	vadFilter         bool
+	vadThreshold      float64
+	vadSpeechPadMs    int
 	conditionPrevious bool   // keep false to break repetition loops
 	initialPrompt     string // optional steering prompt
 
@@ -70,7 +70,15 @@ type AppConfig struct {
 	lean          bool   // -lean: drop foreign streams, keep video + chosen audio
 	noVad         bool   // -novad: disable the silence filter
 	lowMem        bool   // -lowmem: smaller compute type
+	auto          bool   // -auto: never ask, take every default answer
+	force         bool   // -force: redo files that already have subtitles
+	outDir        string // -out:<dir>: write results there instead of next to the source
+	noWait        bool   // -nowait: no "Press Enter" at the end
+	json          bool   // -json: machine-readable events on stdout
+	setup         bool   // -setup: install everything (incl. models), then exit
+	version       bool   // -version: print the version and exit
 	help          bool   // -help: show usage and exit
+	unknownFlags  []string
 	inputArgs     []string
 }
 

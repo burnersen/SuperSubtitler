@@ -4,9 +4,10 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
-	"encoding/json"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +15,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pterm/pterm"
@@ -127,53 +130,35 @@ func pthName(version string) string {
 // downloadFFmpeg streams the official BtbN GPL build to a temp file and extracts
 // only ffmpeg.exe and ffprobe.exe into targetDir.
 func downloadFFmpeg(targetDir string) error {
-	spinner, _ := pterm.DefaultSpinner.WithText("Downloading FFmpeg (this may take a minute)...").Start()
-
-	tmp, err := os.CreateTemp("", "ffmpeg-download-*.zip")
-	if err != nil {
-		_ = spinner.Stop()
-		return fmt.Errorf("Downloader.go: downloadFFmpeg (create temp): %w", err)
+	spinner, _ := pterm.DefaultSpinner.WithText("Looking up the latest FFmpeg build...").Start()
+	stop := func() {
+		if spinner != nil {
+			_ = spinner.Stop()
+		}
 	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	emitSetup("ffmpeg", "start", "Looking up the latest FFmpeg build", 0, 0, 0)
 
 	downloadURL, err := resolveFFmpegDownloadURL()
 	if err != nil {
-		_ = tmp.Close()
-		_ = spinner.Stop()
+		stop()
 		return err
 	}
-
-	resp, err := httpClient.Get(downloadURL)
+	tmpPath, err := httpDownloadToFile(downloadURL, "ffmpeg-download-*.zip", "ffmpeg", "Downloading FFmpeg", spinner)
 	if err != nil {
-		_ = tmp.Close()
-		_ = spinner.Stop()
-		return fmt.Errorf("Downloader.go: downloadFFmpeg (http.Get): %w", err)
+		stop()
+		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		_ = tmp.Close()
-		_ = spinner.Stop()
-		return fmt.Errorf("Downloader.go: downloadFFmpeg: server returned HTTP %d", resp.StatusCode)
+	defer os.Remove(tmpPath)
+	if spinner != nil {
+		spinner.UpdateText("Extracting FFmpeg...")
 	}
-	written, err := io.Copy(tmp, resp.Body)
-	if err != nil {
-		_ = tmp.Close()
-		_ = spinner.Stop()
-		return fmt.Errorf("Downloader.go: downloadFFmpeg (stream to disk): %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = spinner.Stop()
-		return fmt.Errorf("Downloader.go: downloadFFmpeg (close temp): %w", err)
-	}
-	spinner.UpdateText(fmt.Sprintf("Download complete (%.1f MB). Extracting...", float64(written)/1048576))
 
 	targets := map[string]string{
 		"bin/ffmpeg.exe":  filepath.Join(targetDir, "ffmpeg.exe"),
 		"bin/ffprobe.exe": filepath.Join(targetDir, "ffprobe.exe"),
 	}
 	extracted, err := extractZipEntries(tmpPath, targets)
-	_ = spinner.Stop()
+	stop()
 	if err != nil {
 		return err
 	}
@@ -248,6 +233,13 @@ func ensurePython(ctx context.Context, pythonDir string) error {
 	spec := appSettings.engineSpec
 
 	if markerMatches(marker, spec) && fileExists(pyExe) && fileExists(driver) {
+		// A newer SuperSubtitler may ship a newer driver: keep it in sync even
+		// when the engine itself does not need to be reinstalled.
+		if cur, err := os.ReadFile(driver); err != nil || !bytes.Equal(cur, embeddedDriver) {
+			if err := os.WriteFile(driver, embeddedDriver, 0644); err != nil {
+				return fmt.Errorf("Downloader.go: ensurePython (update driver): %w", err)
+			}
+		}
 		return nil
 	}
 
@@ -278,8 +270,9 @@ func markerMatches(marker, spec string) bool {
 }
 
 func installEmbeddedPython(pythonDir string) error {
-	spinner, _ := pterm.DefaultSpinner.WithText("Downloading embedded Python " + appSettings.pythonVersion + "...").Start()
-	tmpPath, err := httpDownloadToFile(pythonEmbedURL(appSettings.pythonVersion), "python-embed-*.zip")
+	label := "Downloading embedded Python " + appSettings.pythonVersion
+	spinner, _ := pterm.DefaultSpinner.WithText(label + "...").Start()
+	tmpPath, err := httpDownloadToFile(pythonEmbedURL(appSettings.pythonVersion), "python-embed-*.zip", "python", label, spinner)
 	if err != nil {
 		_ = spinner.Stop()
 		return err
@@ -323,17 +316,19 @@ func enablePip(ctx context.Context, pythonDir, pyExe string) error {
 		return nil
 	}
 	spinner, _ := pterm.DefaultSpinner.WithText("Bootstrapping pip...").Start()
-	getPip, err := httpDownloadToFile(getPipURL, "get-pip-*.py")
+	getPip, err := httpDownloadToFile(getPipURL, "get-pip-*.py", "pip", "Downloading pip", spinner)
 	if err != nil {
 		_ = spinner.Stop()
 		return err
 	}
 	defer os.Remove(getPip)
+	emitSetup("pip", "progress", "Installing pip", 0, 0, 0)
 	if _, err := runProcess(ctx, pyExe, getPip, "--no-warn-script-location"); err != nil {
 		_ = spinner.Stop()
 		return fmt.Errorf("Downloader.go: enablePip (get-pip): %w", err)
 	}
 	_ = spinner.Stop()
+	emitSetup("pip", "done", "pip installed", 0, 0, 0)
 	return nil
 }
 
@@ -341,14 +336,12 @@ func enablePip(ctx context.Context, pythonDir, pyExe string) error {
 // CUDA wheels. --upgrade keeps the engine current on every (re-)install.
 func installEngine(ctx context.Context, pyExe, spec string) error {
 	spinner, _ := pterm.DefaultSpinner.WithText("Installing whisper engine (large, one-time)...").Start()
-	if _, err := runProcess(ctx, pyExe, "-m", "pip", "install", "--no-warn-script-location", "--upgrade", spec); err != nil {
+	if err := runPip(ctx, pyExe, spinner, "engine", "Installing whisper engine", "--upgrade", spec); err != nil {
 		_ = spinner.Stop()
 		return fmt.Errorf("Downloader.go: installEngine (pip install %s): %w", spec, err)
 	}
 	if appSettings.installCUDA {
-		spinner.UpdateText("Installing CUDA libraries...")
-		cudaArgs := append([]string{"-m", "pip", "install", "--no-warn-script-location"}, cudaWheels...)
-		if _, err := runProcess(ctx, pyExe, cudaArgs...); err != nil {
+		if err := runPip(ctx, pyExe, spinner, "cuda", "Installing CUDA libraries", cudaWheels...); err != nil {
 			_ = spinner.Stop()
 			return fmt.Errorf("Downloader.go: installEngine (pip install cuda): %w", err)
 		}
@@ -357,9 +350,195 @@ func installEngine(ctx context.Context, pyExe, spec string) error {
 	return nil
 }
 
+// runPip runs "pip install" and shows what pip is doing (Collecting …,
+// Downloading … (664.8 MB), Installing …) live, with the elapsed time, instead
+// of one unchanging spinner line for many minutes. No stall watchdog: a single
+// large CUDA wheel can legitimately print nothing for a long time on a slow
+// line; the user can always stop with Ctrl+C.
+func runPip(ctx context.Context, pyExe string, spinner *pterm.SpinnerPrinter, step, label string, pkgs ...string) error {
+	started := time.Now()
+	emitSetup(step, "start", label, 0, 0, 0)
+	status := label
+	var mu sync.Mutex
+	show := func() {
+		mu.Lock()
+		text := status
+		mu.Unlock()
+		if spinner != nil {
+			spinner.UpdateText(label + " — " + text + pterm.Gray("  · "+fmtDuration(time.Since(started))))
+		}
+	}
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	stopTick := make(chan struct{})
+	defer close(stopTick)
+	go func() {
+		for {
+			select {
+			case <-tick.C:
+				show()
+			case <-stopTick:
+				return
+			}
+		}
+	}()
+	onLine := func(line string) {
+		if msg, ok := pipStatus(line); ok {
+			mu.Lock()
+			status = msg
+			mu.Unlock()
+			show()
+			emitSetup(step, "progress", msg, 0, 0, 0)
+		}
+	}
+	args := append([]string{"-m", "pip", "install", "--no-warn-script-location", "--progress-bar", "off"}, pkgs...)
+	if err := runProcessStreamingStall(ctx, 0, onLine, pyExe, args...); err != nil {
+		return err
+	}
+	emitSetup(step, "done", label, 0, 0, 0)
+	return nil
+}
+
+// pipStatus picks the lines of pip's output worth showing as status.
+func pipStatus(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	for _, p := range []string{"Collecting ", "Downloading ", "Installing collected packages", "Successfully installed", "Requirement already satisfied"} {
+		if strings.HasPrefix(line, p) {
+			if len(line) > 110 {
+				line = line[:107] + "..."
+			}
+			return line, true
+		}
+	}
+	return "", false
+}
+
+// ----------------------------------------------------------------------------
+// Speech models
+// ----------------------------------------------------------------------------
+
+// modelMarkerName lists the models already fetched ("name<TAB>path" per line).
+const modelMarkerName = ".ss_models"
+
+// ensureModels fetches every listed speech model up front, so the (1.5–3 GB)
+// download happens with visible progress here instead of silently inside the
+// first language detection. Models already recorded in the marker whose folder
+// still exists are skipped without touching the network.
+func ensureModels(ctx context.Context, models []string) error {
+	marker := filepath.Join(modelDir, modelMarkerName)
+	known := readModelMarker(marker)
+	for _, m := range models {
+		if p, ok := known[m]; ok && dirExists(p) {
+			continue
+		}
+		path, err := fetchModel(ctx, m)
+		if err != nil {
+			return err
+		}
+		known[m] = path
+		if err := writeModelMarker(marker, known); err != nil {
+			pWarn.Println("Could not record the downloaded model: " + shortErr(err))
+		}
+	}
+	return nil
+}
+
+// fetchModel runs the driver's --prefetch mode for one model while watching the
+// model folder grow (the engine's own download bar is not visible from here).
+func fetchModel(ctx context.Context, model string) (string, error) {
+	label := "Downloading speech model " + model
+	spinner, _ := pterm.DefaultSpinner.WithText(label + " (one-time, can take a while)...").Start()
+	stop := func() {
+		if spinner != nil {
+			_ = spinner.Stop()
+		}
+	}
+	emitSetup("model", "start", label, 0, 0, 0)
+	before := dirSize(modelDir)
+	started := time.Now()
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				grown := dirSize(modelDir) - before
+				if grown < 0 {
+					grown = 0
+				}
+				rate := float64(grown) / bytesPerMB / time.Since(started).Seconds()
+				if spinner != nil {
+					spinner.UpdateText(progressText(label, grown, 0, rate))
+				}
+				emitSetup("model", "progress", label, float64(grown)/bytesPerMB, 0, rate)
+			}
+		}
+	}()
+
+	var path string
+	onLine := func(line string) {
+		if rest, ok := strings.CutPrefix(line, "@MODELPATH "); ok {
+			if name, p, ok := strings.Cut(rest, "\t"); ok && name == model {
+				path = strings.TrimSpace(p)
+			}
+		}
+	}
+	err := runProcessStreamingStall(ctx, 0, onLine, pythonExePath, whisperDriverPath, "--prefetch", fModelDir, modelDir, model)
+	close(done)
+	stop()
+	if err != nil {
+		return "", fmt.Errorf("Downloader.go: fetchModel (%s): %w", model, err)
+	}
+	if path == "" {
+		return "", fmt.Errorf("Downloader.go: fetchModel (%s): engine reported no model folder", model)
+	}
+	grown := dirSize(modelDir) - before
+	if grown > bytesPerMB {
+		pOK.Printf("Speech model %s ready (%.0f MB downloaded).\n", model, float64(grown)/bytesPerMB)
+	}
+	emitSetup("model", "done", "Speech model "+model+" ready", float64(max(grown, 0))/bytesPerMB, 0, 0)
+	return path, nil
+}
+
+func readModelMarker(path string) map[string]string {
+	known := map[string]string{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return known
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if name, p, ok := strings.Cut(strings.TrimRight(line, "\r"), "\t"); ok && name != "" {
+			known[name] = p
+		}
+	}
+	return known
+}
+
+func writeModelMarker(path string, known map[string]string) error {
+	names := make([]string, 0, len(known))
+	for n := range known {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, n := range names {
+		b.WriteString(n + "\t" + known[n] + "\n")
+	}
+	return os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
+}
+
 // httpDownloadToFile streams url into a temp file named via pattern and returns
-// its path; the caller removes it. Errors clean up the partial file.
-func httpDownloadToFile(url, pattern string) (string, error) {
+// its path; the caller removes it. Errors clean up the partial file. Progress is
+// shown on spinner (may be nil) and reported as "setup" events for step.
+func httpDownloadToFile(url, pattern, step, label string, spinner *pterm.SpinnerPrinter) (string, error) {
 	tmp, err := os.CreateTemp("", pattern)
 	if err != nil {
 		return "", fmt.Errorf("Downloader.go: httpDownloadToFile (create temp): %w", err)
@@ -377,7 +556,12 @@ func httpDownloadToFile(url, pattern string) (string, error) {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("Downloader.go: httpDownloadToFile: server returned HTTP %d for %s", resp.StatusCode, url)
 	}
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	total := resp.ContentLength
+	if total < 0 {
+		total = 0
+	}
+	prog := newDLProgress(step, label, total, spinner)
+	if _, err := io.Copy(io.MultiWriter(tmp, prog), resp.Body); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("Downloader.go: httpDownloadToFile (stream to disk): %w", err)
@@ -386,6 +570,7 @@ func httpDownloadToFile(url, pattern string) (string, error) {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("Downloader.go: httpDownloadToFile (close temp): %w", err)
 	}
+	prog.finish()
 	return tmpPath, nil
 }
 

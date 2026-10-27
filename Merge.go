@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -78,8 +77,9 @@ func classifyMergeInputs(args []string) (video string, audios, subs []string, ok
 	return video, audios, subs, true
 }
 
-// askMerge shows the detected merge set and asks for confirmation (default yes).
-func askMerge(video string, audios, subs []string) bool {
+// askMerge shows the detected merge set and asks for confirmation (default yes,
+// which -auto and a closed stdin also take).
+func askMerge(video string, audios, subs []string, auto bool) bool {
 	fmt.Println()
 	pInfo.Printf("This looks like a merge: 1 video + %d audio + %d subtitle file(s).\n",
 		len(audios), len(subs))
@@ -90,10 +90,25 @@ func askMerge(video string, audios, subs []string) bool {
 	for _, s := range subs {
 		pterm.Println(pterm.Gray("  Sub   : " + baseName(s)))
 	}
+	if auto {
+		pterm.Println(pterm.Gray("  -auto: merging."))
+		return true
+	}
 	pterm.Print(pterm.LightCyan("  Merge them into one .joined.mkv? [Y/n]: "))
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	resp := strings.ToLower(strings.TrimSpace(line))
-	return resp == "" || resp == "y" || resp == "yes" || resp == "j" || resp == "ja"
+	emitQuestion(eventQuestion{Kind: questionMerge, File: video, Default: "y", Hint: "Enter = yes"})
+	line, _ := readAnswerLine()
+	return parseYes(line, true)
+}
+
+// parseYes reads a yes/no answer (English or German); empty returns def.
+func parseYes(line string, def bool) bool {
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "":
+		return def
+	case "y", "yes", "j", "ja":
+		return true
+	}
+	return false
 }
 
 // runMergeMode losslessly muxes the dropped files into "<video>.joined.mkv".
@@ -101,10 +116,12 @@ func askMerge(video string, audios, subs []string) bool {
 // any, otherwise the base video's own audio (never silent). Subtitles: the
 // dropped subtitle files if any, otherwise the base video's own. Everything is
 // stream-copied (no re-encode). Dropped tracks are language-tagged from their
-// file names when possible.
-func runMergeMode(ctx context.Context, video string, audios, subs []string) {
-	base := strings.TrimSuffix(video, filepath.Ext(video))
-	out := uniqueJoinedPath(base)
+// file names when possible. Reports whether the merge succeeded.
+func runMergeMode(ctx context.Context, cfg *AppConfig, video string, audios, subs []string) bool {
+	out := uniqueJoinedPath(outputBase(cfg, video))
+	emitEvent(eventFile{Ev: "file", Index: 1, Total: 1, Name: baseName(video), Path: video})
+	emitStage(1, 0, "mux")
+	res := eventResult{Ev: "result", Index: 1, Name: baseName(video), Status: "failed"}
 
 	args := []string{"-y", "-v", "error", "-i", video}
 	for _, a := range audios {
@@ -159,10 +176,14 @@ func runMergeMode(ctx context.Context, video string, audios, subs []string) {
 		_ = os.Remove(out)
 		if ctx.Err() != nil {
 			pAbort.Println("Merge cancelled.")
-			return
+			res.Message = "cancelled"
+			emitEvent(res)
+			return false
 		}
 		pErr.Println("Merge failed: " + shortErr(err))
-		return
+		res.Message = shortErr(err)
+		emitEvent(res)
+		return false
 	}
 	_ = spinner.Stop()
 
@@ -173,6 +194,9 @@ func runMergeMode(ctx context.Context, video string, audios, subs []string) {
 		pInfo.Println("No audio file given — kept the video's own audio.")
 	}
 	pOK.Println("Merged → " + baseName(out))
+	res.Status, res.Outputs = "success", []string{out}
+	emitEvent(res)
+	return true
 }
 
 // uniqueJoinedPath returns "<base>.joined.mkv", numbering it if that exists.

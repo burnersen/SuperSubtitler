@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -104,8 +103,9 @@ type trackSel struct {
 
 // selectTracks decides which audio streams to subtitle. -track:N forces exactly
 // one; a single audio stream is taken without asking; several streams with no
-// -track trigger an interactive menu (Enter = all, or numbers like "1,3").
-func selectTracks(cfg *AppConfig, pd *probeData) ([]trackSel, error) {
+// -track trigger an interactive menu (Enter = all, or numbers like "1,3"), which
+// -auto answers with "all".
+func selectTracks(cfg *AppConfig, pd *probeData, file string) ([]trackSel, error) {
 	audio := pd.audioStreams()
 	if len(audio) == 0 {
 		return nil, fmt.Errorf("Audio.go: selectTracks: no audio stream")
@@ -120,7 +120,7 @@ func selectTracks(cfg *AppConfig, pd *probeData) ([]trackSel, error) {
 	if len(audio) == 1 {
 		return []trackSel{{stream: audio[0], ordinal: 0}}, nil
 	}
-	chosen := promptTrackSelection(audio)
+	chosen := promptTrackSelection(audio, file, cfg.auto)
 	sels := make([]trackSel, 0, len(chosen))
 	for _, ord := range chosen {
 		sels = append(sels, trackSel{stream: audio[ord], ordinal: ord})
@@ -129,29 +129,42 @@ func selectTracks(cfg *AppConfig, pd *probeData) ([]trackSel, error) {
 }
 
 // promptTrackSelection lists the audio streams and asks which to subtitle.
-// Returns the 0-based ordinals; empty input selects all.
-func promptTrackSelection(audio []probeStream) []int {
+// Returns the 0-based ordinals; empty input (or -auto, or a closed stdin)
+// selects all.
+func promptTrackSelection(audio []probeStream, file string, auto bool) []int {
 	fmt.Println()
 	pInfo.Printf("This file has %d audio tracks — which should be subtitled?\n", len(audio))
+	options := make([]questionOption, 0, len(audio))
 	for i, s := range audio {
-		lang := containerLang(s)
-		if lang == "" {
-			lang = "und"
-		}
-		layout := s.ChannelLayout
-		if layout == "" {
-			layout = fmt.Sprintf("%dch", s.Channels)
-		}
-		line := fmt.Sprintf("  %d) %-3s  %-6s %-8s", i+1, lang, s.CodecName, layout)
-		if s.Tags != nil && s.Tags["title"] != "" {
-			line += "  " + s.Tags["title"]
-		}
-		pterm.Println(pterm.LightCyan(line))
+		label := trackLabel(s)
+		pterm.Println(pterm.LightCyan(fmt.Sprintf("  %d) %s", i+1, label)))
+		options = append(options, questionOption{N: i + 1, Label: label, Lang: containerLang(s)})
+	}
+	if auto {
+		pterm.Println(pterm.Gray("  -auto: subtitling all tracks."))
+		return parseTrackChoice("", len(audio))
 	}
 	pterm.Print(pterm.Gray("  Enter numbers (e.g. 1,3) or press Enter for all: "))
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
+	emitQuestion(eventQuestion{Kind: questionTracks, File: file, Hint: "Enter = all", Options: options, Default: "all"})
+	line, _ := readAnswerLine()
 	return parseTrackChoice(line, len(audio))
+}
+
+// trackLabel renders one audio stream as "de   ac3    5.1(side)  Title".
+func trackLabel(s probeStream) string {
+	lang := containerLang(s)
+	if lang == "" {
+		lang = "und"
+	}
+	layout := s.ChannelLayout
+	if layout == "" {
+		layout = fmt.Sprintf("%dch", s.Channels)
+	}
+	label := fmt.Sprintf("%-3s  %-6s %-8s", lang, s.CodecName, layout)
+	if s.Tags != nil && s.Tags["title"] != "" {
+		label += "  " + s.Tags["title"]
+	}
+	return strings.TrimRight(label, " ")
 }
 
 // parseTrackChoice turns "1,3" / "1 3" into 0-based ordinals, ignoring junk and
@@ -222,9 +235,11 @@ func monoFilter(cfg *AppConfig, s probeStream) string {
 // ----------------------------------------------------------------------------
 
 // extractDetectionChunks extracts the detection sample (clamped to the file) and
-// splits it into ~30s mono WAV chunks. No lead-in here — detection does not need
-// frame-accurate timing.
-func extractDetectionChunks(ctx context.Context, cfg *AppConfig, path string, s probeStream, ordinal int, duration float64, outDir string) ([]string, error) {
+// splits it into ~30s mono WAV chunks named "<prefix>NNN.wav" in outDir. The
+// prefix keeps the chunks of many tracks apart in one shared folder, so the
+// whole batch can be detected in a single engine call. No lead-in here —
+// detection does not need frame-accurate timing.
+func extractDetectionChunks(ctx context.Context, cfg *AppConfig, path string, s probeStream, ordinal int, duration float64, outDir, prefix string) ([]string, error) {
 	startSec := duration * float64(appSettings.detectStartPercent) / 100.0
 	sampleSec := float64(appSettings.detectSeconds)
 	if duration > 0 {
@@ -240,7 +255,7 @@ func extractDetectionChunks(ctx context.Context, cfg *AppConfig, path string, s 
 		return nil, fmt.Errorf("Audio.go: extractDetectionChunks (mkdir): %w", err)
 	}
 	filter := monoFilter(cfg, s)
-	pattern := filepath.Join(outDir, "det_%03d.wav")
+	pattern := filepath.Join(outDir, prefix+"%03d.wav")
 	args := []string{
 		"-y", "-v", "error",
 		"-ss", fmt.Sprintf("%.3f", startSec),
@@ -256,7 +271,7 @@ func extractDetectionChunks(ctx context.Context, cfg *AppConfig, path string, s 
 	if _, err := runProcess(ctx, ffmpegPath, args...); err != nil {
 		return nil, fmt.Errorf("Audio.go: extractDetectionChunks: %w", err)
 	}
-	matches, err := filepath.Glob(filepath.Join(outDir, "det_*.wav"))
+	matches, err := filepath.Glob(filepath.Join(outDir, prefix+"*.wav"))
 	if err != nil {
 		return nil, fmt.Errorf("Audio.go: extractDetectionChunks (glob): %w", err)
 	}
@@ -298,8 +313,9 @@ func extractMainWAV(ctx context.Context, cfg *AppConfig, path string, s probeStr
 // Diagnostic mode: split every physical channel into a playable WAV
 // ----------------------------------------------------------------------------
 
-func runDiagnostic(ctx context.Context, path string, s probeStream, ordinal int) ([]string, error) {
-	base := strings.TrimSuffix(path, filepath.Ext(path))
+// runDiagnostic writes "<base>.chNN.wav" for every physical channel of the
+// chosen stream; base is the output stem (see outputBase).
+func runDiagnostic(ctx context.Context, path, base string, s probeStream, ordinal int) ([]string, error) {
 	var written []string
 	n := s.Channels
 	if n < 1 {

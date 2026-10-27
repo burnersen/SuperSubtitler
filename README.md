@@ -33,7 +33,7 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 2. Drag a video or audio file (or a whole folder) onto it.
 3. Done. You get a `Movie.<lang>.srt` next to it **and** a `Movie.subbed.mkv` with the subtitle track built in.
 
-On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a self-contained Python, the faster-whisper engine and the speech models — no installs, no PATH fiddling, no Python knowledge needed. After that, everything runs offline and locally; your audio never leaves your machine.
+On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a self-contained Python, the faster-whisper engine and the speech models — no installs, no PATH fiddling, no Python knowledge needed. Every download shows its progress (MB, speed); `-setup` does all of it in one go without processing a file. After that, everything runs offline and locally; your audio never leaves your machine.
 
 ---
 
@@ -57,6 +57,7 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 - **`-translate`:** translates everything to English (the only target Whisper translates to). Uses the large model, which is required for translation.
 - **`-lang:XX`:** skip detection and force a source language, e.g. `-lang:de`, `-lang:es`, `-lang:fr`.
 - **Mismatch?** If a file's language tag disagrees with what the audio actually is, you're asked which to trust (pressing Enter keeps the detected language).
+- **All questions up front.** Track choice and language questions are all asked at the start, before the long transcription part begins — once the progress bars appear you can walk away. With `-auto` nothing is asked at all.
 
 ---
 
@@ -80,6 +81,13 @@ Drag files or folders onto the EXE, or pass them as arguments. Flags and files m
 | `-novad` | Disable the silence filter (transcribe everything, pauses included) |
 | `-lowmem` | Smaller compute type (less video memory, a bit slower) |
 | `-split` | Export each audio channel as a WAV to find the speech; skip transcription |
+| `-auto` | Never ask: all audio tracks, the detected language, merge = yes |
+| `-force` | Redo files that already have subtitles (overwrites the old results) |
+| `-out:FOLDER` | Write the `.srt`/`.mkv` results into FOLDER instead of next to the source |
+| `-nowait` | Don't wait for Enter at the end (for scripts and shortcuts) |
+| `-setup` | Download and install everything, speech models included, then exit |
+| `-json` | Machine-readable events on stdout, one JSON line each (for front-ends) |
+| `-version` | Print the version and exit |
 | `-help` | Show the banner and full options list |
 
 **Supported input** — Video → `.subbed.mkv`: `mkv mp4 mov m4v avi ts m2ts webm mpg wmv flv 3gp` · Audio → `.srt` only: `m4a mp3 wav flac aac ogg opus m4b`

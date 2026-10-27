@@ -36,13 +36,13 @@ const (
 	winENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
 
 	// Job object
-	winJobObjectExtendedLimitInformation = 9
+	winJobObjectExtendedLimitInformation  = 9
 	winJOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 
 	// OpenProcess access rights needed to assign a child to a job
-	winPROCESS_SET_QUOTA      = 0x0100
-	winPROCESS_TERMINATE      = 0x0001
-	winPROCESS_ASSIGN_TO_JOB  = winPROCESS_SET_QUOTA | winPROCESS_TERMINATE
+	winPROCESS_SET_QUOTA     = 0x0100
+	winPROCESS_TERMINATE     = 0x0001
+	winPROCESS_ASSIGN_TO_JOB = winPROCESS_SET_QUOTA | winPROCESS_TERMINATE
 )
 
 // ----------------------------------------------------------------------------
@@ -251,6 +251,13 @@ func runProcess(ctx context.Context, name string, args ...string) ([]byte, error
 // onLine while the process is still running (used for live progress). stderr is
 // buffered and appended to the error on failure, exactly like runProcess.
 func runProcessStreaming(ctx context.Context, onLine func(string), name string, args ...string) error {
+	return runProcessStreamingStall(ctx, streamStallLimit, onLine, name, args...)
+}
+
+// runProcessStreamingStall is runProcessStreaming with an explicit stall limit;
+// 0 disables the watchdog (pip and model downloads, which can be silent for a
+// long time without being hung).
+func runProcessStreamingStall(ctx context.Context, stallLimit time.Duration, onLine func(string), name string, args ...string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -291,11 +298,13 @@ func runProcessStreaming(ctx context.Context, onLine func(string), name string, 
 	sc := bufio.NewScanner(stdoutPipe)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
-		if watchdog == nil {
-			watchdog = time.AfterFunc(streamStallLimit, func() { cancel(errProcessStall) })
-			defer watchdog.Stop()
-		} else {
-			watchdog.Reset(streamStallLimit)
+		if stallLimit > 0 {
+			if watchdog == nil {
+				watchdog = time.AfterFunc(stallLimit, func() { cancel(errProcessStall) })
+				defer watchdog.Stop()
+			} else {
+				watchdog.Reset(stallLimit)
+			}
 		}
 		if onLine != nil {
 			onLine(sc.Text())
@@ -308,7 +317,7 @@ func runProcessStreaming(ctx context.Context, onLine func(string), name string, 
 		}
 		if errors.Is(context.Cause(runCtx), errProcessStall) {
 			return fmt.Errorf("SysUtils.go: runProcessStreaming (%s stalled: no output for %s)",
-				baseName(name), streamStallLimit)
+				baseName(name), stallLimit)
 		}
 		tail := strings.TrimSpace(stderr.String())
 		if len(tail) > 600 {
