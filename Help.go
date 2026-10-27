@@ -112,8 +112,8 @@ SUBTITLE CLEANER
 
 FFMPEG
   ffmpeg.exe and ffprobe.exe do all the audio/video work.
-  SuperSubtitler downloads its tested FFmpeg build (8.1.2)
-  automatically and checks it; an FFmpeg of another origin
+  SuperSubtitler downloads its own FFmpeg build (8.1.2, LGPL,
+  made from the official source) and checks it; an FFmpeg of another origin
   next to the EXE is replaced by it once, so every install
   works with the same FFmpeg.
 
@@ -131,7 +131,8 @@ FIRST RUN
 
   Everything is a fixed, tested set (exact versions, every
   file checked against its SHA-256), fetched from the
-  project's own mirror first - the same for every user.
+  project's own mirror (release runtime-v1 on GitHub)
+  first - the same for every user.
 
 REQUIREMENTS
   Windows 10/11 x64. An Nvidia GPU makes it much faster; without
