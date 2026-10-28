@@ -1,0 +1,139 @@
+# Measures how well -speakers tells voices apart, on a fixed, checksummed
+# part of VoxConverse (66 minutes of debates and news, 1-11 speakers, labelled
+# by hand). Runs transcribe.py --diarize - the code SuperSubtitler runs - with
+# the pinned models, and fails when the error rate gets worse than the limit
+# below. Linux is enough here: sherpa-onnx computes the same on every system.
+#
+# By hand with "sweep" ticked it compares several speaker-embedding models
+# and thresholds side by side (one job each, in parallel) and prints a
+# ranking - the basis for choosing what runtime.json pins.
+name: Speaker benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      sweep:
+        description: 'Compare embedding models and thresholds'
+        type: boolean
+        default: false
+  push:
+    paths:
+      - Speakers.go
+      - transcribe.py
+      - runtime.json
+      - Config.go
+      - .github/scripts/speaker_bench.py
+      - .github/workflows/speaker-benchmark.yml
+
+permissions:
+  contents: read
+
+env:
+  # The DER of the shipped setup may not rise above this (percent).
+  MAX_DER: '100'
+  # Candidates for the sweep, all from the repository and revision the pinned
+  # embedding comes from.
+  CANDIDATES: >-
+    3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx
+    3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
+    3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
+    wespeaker_en_voxceleb_resnet34_LM.onnx
+    wespeaker_en_voxceleb_CAM++_LM.onnx
+    nemo_en_titanet_small.onnx
+  THRESHOLDS: '0.3 0.4 0.5 0.6 0.7 0.8 0.9'
+  CANDIDATE_URL: https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/0743f301363dec56491a490f6d6cbc9d67f9a3bf
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        shell: python
+        env:
+          SWEEP: ${{ inputs.sweep && 'yes' || 'no' }}
+        run: |
+          import json, os
+          if os.environ["SWEEP"] == "yes":
+              jobs = [{"embedding": e, "threshold": t}
+                      for e in os.environ["CANDIDATES"].split() for t in os.environ["THRESHOLDS"].split()]
+          else:
+              jobs = [{"embedding": "pinned", "threshold": "shipped"}]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("matrix=" + json.dumps({"include": jobs}) + "\n")
+
+  measure:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.embedding }} @ ${{ matrix.threshold }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install
+        run: |
+          ver=$(python -c "import json; print([p['version'] for p in json.load(open('runtime.json'))['packages'] if p['name']=='sherpa-onnx'][0])")
+          pip install --quiet "sherpa-onnx==$ver" numpy scipy
+
+      - uses: actions/cache@v4
+        with:
+          path: bench/voxconverse
+          key: speaker-bench-voxconverse-${{ hashFiles('.github/scripts/speaker_bench.py') }}
+          restore-keys: speaker-bench-voxconverse-
+
+      - name: fetch models and test set
+        run: python .github/scripts/speaker_bench.py fetch bench
+
+      - name: measure
+        run: |
+          args=""
+          if [ "${{ matrix.embedding }}" != "pinned" ]; then
+            curl -sSfL -o "bench/${{ matrix.embedding }}" "$CANDIDATE_URL/${{ matrix.embedding }}"
+            args="--embedding bench/${{ matrix.embedding }}"
+          fi
+          if [ "${{ matrix.threshold }}" != "shipped" ]; then
+            args="$args --threshold ${{ matrix.threshold }}"
+          else
+            args="$args --max-der $MAX_DER"
+          fi
+          python .github/scripts/speaker_bench.py run bench $args --json result.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ strategy.job-index }}
+          path: result.json
+          if-no-files-found: ignore
+
+  ranking:
+    needs: measure
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+      - name: ranking
+        shell: python
+        run: |
+          import glob, json, os
+          rows = [r for f in glob.glob("result-*/result.json") for r in json.load(open(f))]
+          rows.sort(key=lambda r: r["der"])
+          out = ["### Speaker recognition ranking (VoxConverse, 66 min, 1-11 speakers; lower DER is better)", "",
+                 "| embedding | threshold | DER % | missed | false | confusion | speakers off by (avg) |",
+                 "|---|---|---|---|---|---|---|"]
+          for r in rows:
+              out.append("| %s | %s | **%s** | %s | %s | %s | %s |" % (r["embedding"], r["threshold"], r["der"],
+                         r["miss"], r["false"], r["confusion"], r["count_off"]))
+          text = "\n".join(out)
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(text + "\n")
