@@ -1,6 +1,6 @@
 # Measures how well -to translates: FLORES-200 sentences (translated by
 # professionals, checksummed) go from English into German, French, Spanish
-# and Italian through transcribe.py --translate_text - the code SuperSubtitler
+# Italian and Russian through transcribe.py --translate_text - the code SuperSubtitler
 # runs - with the pinned model, and are scored against the human translations
 # (chrF; higher is better). Fails when a language drops below its limit.
 name: Translation benchmark
@@ -11,7 +11,7 @@ on:
       targets:
         description: 'Target languages (space-separated)'
         type: string
-        default: 'de fr es it'
+        default: 'de fr es it ru'
       sentences:
         description: 'Sentences per language'
         type: string
@@ -28,8 +28,8 @@ permissions:
 
 env:
   # chrF limits, a little below what the shipped model measures (200
-  # sentences: de 67.0, fr 72.0, es 56.7, it 61.2).
-  MIN_CHRF: 'de=65.5 fr=70.5 es=55 it=59.5'
+  # sentences: de 67.0, fr 72.0, es 56.7, it 61.2, ru 61.2).
+  MIN_CHRF: 'de=65.5 fr=70.5 es=55 it=59.5 ru=59.5'
 
 jobs:
   measure:
@@ -59,4 +59,4 @@ jobs:
       - name: measure
         run: |
           targets="${{ inputs.targets }}"; sentences="${{ inputs.sentences }}"
-          python .github/scripts/translate_bench.py run bench --targets ${targets:-de fr es it} --sentences ${sentences:-200} --min-chrf $MIN_CHRF --json result.json
+          python .github/scripts/translate_bench.py run bench --targets ${targets:-de fr es it ru} --sentences ${sentences:-200} --min-chrf $MIN_CHRF --json result.json
