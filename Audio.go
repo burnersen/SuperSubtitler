@@ -71,6 +71,17 @@ func (pd *probeData) durationSec() float64 {
 	return f
 }
 
+// subtitleCount is the number of subtitle streams in the file.
+func (pd *probeData) subtitleCount() int {
+	n := 0
+	for _, s := range pd.Streams {
+		if s.CodecType == "subtitle" {
+			n++
+		}
+	}
+	return n
+}
+
 func (pd *probeData) audioStreams() []probeStream {
 	var a []probeStream
 	for _, s := range pd.Streams {

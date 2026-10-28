@@ -1,0 +1,62 @@
+# Measures how well -to translates: FLORES-200 sentences (translated by
+# professionals, checksummed) go from English into German, French, Spanish,
+# Italian and Russian through transcribe.py --translate_text - the code SuperSubtitler
+# runs - with the pinned model, and are scored against the human translations
+# (chrF; higher is better). Fails when a language drops below its limit.
+name: Translation benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Target languages (space-separated)'
+        type: string
+        default: 'de fr es it ru'
+      sentences:
+        description: 'Sentences per language'
+        type: string
+        default: '200'
+  push:
+    paths:
+      - transcribe.py
+      - runtime.json
+      - .github/scripts/translate_bench.py
+      - .github/workflows/translate-benchmark.yml
+
+permissions:
+  contents: read
+
+env:
+  # chrF limits, a little below what the shipped model measures (200
+  # sentences: de 67.0, fr 72.0, es 56.7, it 61.2, ru 61.2).
+  MIN_CHRF: 'de=65.5 fr=70.5 es=55 it=59.5 ru=59.5'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install
+        run: |
+          pins=$(python -c "import json; print(' '.join('%s==%s' % (p['name'], p['version']) for p in json.load(open('runtime.json'))['packages'] if p['name'] in ('ctranslate2', 'tokenizers', 'numpy')))")
+          pip install --quiet $pins sacrebleu==2.6.0
+
+      - uses: actions/cache@v4
+        with:
+          path: bench
+          key: translate-bench-${{ hashFiles('runtime.json', '.github/scripts/translate_bench.py') }}
+          restore-keys: translate-bench-
+
+      - name: fetch model and test set
+        run: python .github/scripts/translate_bench.py fetch bench
+
+      - name: measure
+        run: |
+          targets="${{ inputs.targets }}"; sentences="${{ inputs.sentences }}"
+          python .github/scripts/translate_bench.py run bench --targets ${targets:-de fr es it ru} --sentences ${sentences:-200} --min-chrf $MIN_CHRF --json result.json

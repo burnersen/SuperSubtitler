@@ -24,7 +24,9 @@ type RunOptions struct {
 	Auto      bool   `json:"auto"`
 	Force     bool   `json:"force"`
 	Speakers  bool   `json:"speakers"` // mark speaker changes (-speakers)
-	OutDir    string `json:"outDir"`   // "" = next to the source
+	// TranslateTo adds the subtitles in this language too (-to:XX); "" = none.
+	TranslateTo string `json:"translateTo"`
+	OutDir      string `json:"outDir"` // "" = next to the source
 	// Channel is the physical channel to isolate ("0", "2", …), "" = the
 	// automatic voice-focused downmix. A string on purpose: an int would make
 	// a missing value mean "channel 0" instead of "automatic".
@@ -76,6 +78,12 @@ func SubtitleArgs(o RunOptions) ([]string, error) {
 		if f.on {
 			args = append(args, f.flag)
 		}
+	}
+	if to := strings.ToLower(strings.TrimSpace(o.TranslateTo)); to != "" {
+		if !ValidLanguage(to) {
+			return nil, errors.New("translation language must be a 2- or 3-letter code such as de, fr or es")
+		}
+		args = append(args, "-to:"+to)
 	}
 	ch, err := channelArg(o.Channel)
 	if err != nil {

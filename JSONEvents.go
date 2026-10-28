@@ -29,10 +29,11 @@ package main
 //	setup     first-run installation steps with download progress
 //	skip      an input that is not processed (already subtitled, own output)
 //	file      a queued file (index is 1-based and stays the file's id)
-//	stage     what a file/track is doing now (probe|detect|extract|transcribe|speakers|mux)
+//	stage     what a file/track is doing now (probe|detect|extract|transcribe|speakers|translate|mux)
 //	lang      the resolved language plan of a track
 //	progress  progress of a track's transcription, or of its speaker
-//	          recognition when "stage" is "speakers" (0..1, with ETA)
+//	          marking or translation when "stage" is "speakers" or
+//	          "translate" (0..1, with ETA)
 //	speakers  how many voice changes a track's speaker marking found (-speakers)
 //	question  the tool waits for one stdin line
 //	result    a file is finished (success|failed)
@@ -113,13 +114,14 @@ func emitEvent(v any) {
 // ----------------------------------------------------------------------------
 
 type eventRun struct {
-	Ev        string `json:"ev"` // "run"
-	Version   string `json:"version"`
-	Mode      string `json:"mode"` // subtitle | merge | split | setup
-	Files     int    `json:"files"`
-	Translate bool   `json:"translate,omitempty"`
-	Auto      bool   `json:"auto,omitempty"`
-	Speakers  bool   `json:"speakers,omitempty"`
+	Ev        string   `json:"ev"` // "run"
+	Version   string   `json:"version"`
+	Mode      string   `json:"mode"` // subtitle | merge | split | setup
+	Files     int      `json:"files"`
+	Translate bool     `json:"translate,omitempty"`
+	Auto      bool     `json:"auto,omitempty"`
+	Speakers  bool     `json:"speakers,omitempty"`
+	To        []string `json:"to,omitempty"` // -to: translation targets
 }
 
 type eventSetup struct {
@@ -165,7 +167,7 @@ type eventStage struct {
 	Ev    string `json:"ev"` // "stage"
 	Index int    `json:"index"`
 	Track int    `json:"track,omitempty"` // 1-based position in the file's selection
-	Stage string `json:"stage"`           // probe | detect | extract | transcribe | speakers | mux
+	Stage string `json:"stage"`           // probe | detect | extract | transcribe | speakers | translate | mux
 }
 
 type eventLang struct {
@@ -187,7 +189,7 @@ type eventProgress struct {
 	Tracks int     `json:"tracks,omitempty"`
 	Pct    float64 `json:"pct"` // 0..1 of this track
 	ETASec float64 `json:"eta_sec,omitempty"`
-	Stage  string  `json:"stage,omitempty"` // "speakers"; empty = transcription
+	Stage  string  `json:"stage,omitempty"` // "speakers" or "translate"; empty = transcription
 }
 
 // eventSpeakers reports the outcome of a track's speaker marking: how often
@@ -267,6 +269,7 @@ func emitRun(mode string, files int, cfg *AppConfig) {
 		ev.Translate = cfg.translate
 		ev.Auto = cfg.auto
 		ev.Speakers = cfg.speakers
+		ev.To = cfg.translateTo
 	}
 	emitEvent(ev)
 }
@@ -314,6 +317,7 @@ func emitResult(job *fileJob) {
 		for _, t := range job.tracks {
 			if t.srtPath != "" {
 				ev.Outputs = append(ev.Outputs, t.srtPath)
+				ev.Outputs = append(ev.Outputs, t.extraSRT...)
 			}
 		}
 		if job.outPath != "" {

@@ -67,6 +67,12 @@ func TestSubtitleArgs(t *testing.T) {
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %q", args)
 	}
+	if to, _ := SubtitleArgs(RunOptions{TranslateTo: " DE "}); to[len(to)-1] != "-to:de" {
+		t.Errorf("translateTo = %q", to)
+	}
+	if _, err := SubtitleArgs(RunOptions{TranslateTo: "deutsch"}); err == nil {
+		t.Error("a language name must be refused for the translation too")
+	}
 	if _, err := SubtitleArgs(RunOptions{Language: "german"}); err == nil {
 		t.Error("a language name must be refused, only codes are passed on")
 	}

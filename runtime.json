@@ -391,6 +391,42 @@
       ],
       "mirror": true,
       "license": "MIT (pyannote segmentation-3.0, CNRS)"
+    },
+    "translation": {
+      "repo": "santhosh/madlad400-3b-ct2",
+      "revision": "c32ad0cf118807ea6258d14be137547155842723",
+      "files": [
+        {
+          "name": "model.bin",
+          "size": 2950208251,
+          "sha256": "f3c87256a2c888100c179d7dcd7f41df17c767469546c59d32c7dde86c740a6b"
+        },
+        {
+          "name": "config.json",
+          "size": 190,
+          "sha256": "a428c51cd35517554523b3c6b6974a5928bc35e82b130869a543566a34a83b93"
+        },
+        {
+          "name": "shared_vocabulary.json",
+          "size": 5477099,
+          "sha256": "c327551ce3ca6efc7b437e11a267f79979893332dda8a1d146e2c950815193f8"
+        }
+      ],
+      "mirror": true,
+      "license": "Apache-2.0 (MADLAD-400 3B by Google; CTranslate2 int8 conversion)"
+    },
+    "translation-tokenizer": {
+      "repo": "google/madlad400-3b-mt",
+      "revision": "fa184c675da0b5c9e1c8694fccd4e12e2d422094",
+      "files": [
+        {
+          "name": "tokenizer.json",
+          "size": 16629031,
+          "sha256": "a2799ccc696b752ba00c34f58726bfe253a04921ceb6cfc620400f560474790b"
+        }
+      ],
+      "mirror": true,
+      "license": "Apache-2.0 (MADLAD-400 tokenizer, Google)"
     }
   },
   "packages_mirror": true

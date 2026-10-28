@@ -84,6 +84,8 @@ func boolArg(b bool) string {
 func runWhisper(ctx context.Context, baseArgs []string, inputs []string, onLine func(string)) error {
 	device, compute := engineDevice(lowMemActive)
 
+	gpuMu.Lock()
+	defer gpuMu.Unlock()
 	try := func(dev, comp string) error {
 		args := append([]string{}, baseArgs...)
 		args = append(args, fDevice, dev, fComputeType, comp)

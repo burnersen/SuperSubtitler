@@ -60,7 +60,7 @@ jobs:
   # would have caught the PyAV 19 break.
   e2e:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -134,6 +134,19 @@ jobs:
           Write-Host $srt
           if ($n -ne 0) { Write-Host "::error::JFK alone must have no speaker change, got $n"; exit 1 }
           if ($srt -match '(?m)^- ') { Write-Host "::error::a single voice got dialogue dashes"; exit 1 }
+
+      # Translation (-to): JFK into German, a second subtitle file next to the
+      # English one. The 3 GB model makes this the slowest step.
+      - name: translate
+        working-directory: e2e
+        run: |
+          .\SuperSubtitler.exe -json -auto -force -to:de jfk.flac > to.jsonl
+          if ($LASTEXITCODE -ne 0) { Get-Content to.jsonl; Write-Host "::error::run exited with $LASTEXITCODE"; exit 1 }
+          if (-not (Test-Path jfk.de.srt)) { Get-Content to.jsonl; Write-Host "::error::no jfk.de.srt"; exit 1 }
+          $de = Get-Content jfk.de.srt -Raw -Encoding UTF8
+          Write-Host $de
+          if ($de -notmatch 'Land') { Write-Host "::error::that is no German translation of JFK"; exit 1 }
+          if ((Get-Content to.jsonl | Select-String '"outputs":\[[^]]*jfk\.de\.srt' -Quiet) -ne $true) { Write-Host "::error::the result does not list jfk.de.srt"; exit 1 }
 
   gui:
     runs-on: windows-latest

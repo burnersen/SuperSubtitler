@@ -25,7 +25,7 @@ import (
 
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
-const appVersion = "0.3.5"
+const appVersion = "0.4.0"
 
 // pterm prefix printers, shared across the package.
 var (
@@ -112,6 +112,9 @@ func run() (code int) {
 	printHeader()
 	for _, f := range cfg.unknownFlags {
 		pWarn.Println("Ignoring unknown flag: " + f)
+	}
+	for _, b := range cfg.badTargets {
+		pWarn.Println("-to: \"" + b + "\" is no language code (like de, fr, es) — ignored.")
 	}
 
 	if err := initJobObject(); err != nil {
@@ -312,6 +315,7 @@ func printUsage() {
 		{pterm.LightCyan("-lean"), "MKV keeps only video + chosen audio + the subtitle track."},
 		{pterm.LightCyan("-novad"), "Disable the voice-activity (silence) filter."},
 		{pterm.LightCyan("-lowmem"), "Smaller compute type (less VRAM, slightly slower)."},
+		{pterm.LightCyan("-to:XX"), "Also write the subtitles in language XX (e.g. -to:de, -to:de,fr): own track and .srt."},
 		{pterm.LightCyan("-speakers"), "Mark speaker changes: new subtitle per voice, \"- \" lines for quick exchanges."},
 		{pterm.LightCyan("-split"), "Export each audio channel as a WAV (to find the speech); skip transcription."},
 		{pterm.LightCyan("-auto"), "Never ask: all tracks, detected language, merge = yes."},
@@ -460,6 +464,11 @@ func modelsNeeded(cfg *AppConfig) []string {
 	if cfg.speakers || cfg.setup {
 		add(speakerSegmentationModel)
 	}
+	// The translation model (3 GB) only when translating: -setup leaves it out.
+	if len(cfg.translateTo) > 0 {
+		add(translationModel)
+		add(translationTokenizer)
+	}
 	return list
 }
 
@@ -482,6 +491,10 @@ func parseArgs(argv []string) *AppConfig {
 			cfg.outDir = strings.Trim(a[len("-out:"):], `"`)
 		case low == "-translate" || low == "-en":
 			cfg.translate = true
+		case strings.HasPrefix(low, "-to:"):
+			ok, bad := parseTargets(a[len("-to:"):])
+			cfg.translateTo = append(cfg.translateTo, ok...)
+			cfg.badTargets = append(cfg.badTargets, bad...)
 		case low == "-speakers":
 			cfg.speakers = true
 		case strings.HasPrefix(low, "-speakers:"):
@@ -694,6 +707,7 @@ type trackJob struct {
 	plan      langPlan
 	wj        *whisperJSON
 	srtPath   string
+	extraSRT  []string // translations (-to)
 	outLang   string
 	ok        bool
 	err       error
@@ -1143,14 +1157,13 @@ func finalizeStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 				return
 			}
 		}
-		srt := buildSRT(t.wj, leadinSec, appSettings, turns)
-		srt = cleanSRT(srt, activeCleaner)
-		if strings.TrimSpace(srt) == "" {
+		cues := filterCues(buildCues(t.wj, leadinSec, appSettings, turns), activeCleaner)
+		if len(cues) == 0 {
 			t.err = errors.New("no speech recognized")
 			continue
 		}
 		srtPath := uniqueSRTPath(base, t.outLang, usedSRT)
-		if err := writeSRT(srtPath, srt); err != nil {
+		if err := writeSRT(srtPath, renderSRT(cues)); err != nil {
 			t.err = err
 			continue
 		}
@@ -1158,15 +1171,22 @@ func finalizeStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 		t.ok = true
 		subs = append(subs, subInput{path: srtPath, lang: t.outLang})
 		audioOrdinals = append(audioOrdinals, t.ordinal)
+		if len(cfg.translateTo) > 0 {
+			subs = append(subs, translateTrack(ctx, cfg, job, i, t, cues, base, usedSRT)...)
+			if ctx.Err() != nil {
+				job.fail(ctx.Err())
+				return
+			}
+		}
 	}
 
 	if len(subs) == 0 {
 		job.fail(firstTrackErr(job, "no speech recognized"))
 		return
 	}
-	if len(subs) < len(job.tracks) {
+	if len(audioOrdinals) < len(job.tracks) {
 		pWarn.Printf("%s — %d of %d track(s) produced no subtitle.\n",
-			job.label(), len(job.tracks)-len(subs), len(job.tracks))
+			job.label(), len(job.tracks)-len(audioOrdinals), len(job.tracks))
 	}
 	if cfg.srtOnly || isAudioFile(job.src) {
 		job.status = "ok"
