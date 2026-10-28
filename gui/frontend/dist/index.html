@@ -122,6 +122,7 @@ h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
 .item .acts { grid-row: span 2; display: flex; gap: 6px; align-items: center; }
 .item .meta { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
 .item .bar { grid-column: 1 / -1; }
+.field .hint { display: block; font-size: 11.5px; color: var(--muted); margin-top: 4px; font-weight: 400; }
 .chip { border-radius: 99px; padding: 0 8px; font-size: 11.5px; font-weight: 600; background: var(--panel-2); color: var(--muted); }
 .chip.working, .chip.analysing { color: var(--accent); background: var(--wash); }
 .chip.done { color: var(--ok); }
@@ -285,6 +286,22 @@ a.link:hover { text-decoration: underline; }
           </label>
           <label class="opt"><input type="checkbox" id="opt-translate" />
             <span>Translate to English<small>Whisper can only translate into English. Uses the large model.</small></span></label>
+          <label class="field"><span>Also as subtitles in</span>
+            <select id="opt-to">
+              <option value="">— no translation —</option>
+              <option value="de">German (de)</option>
+              <option value="en">English (en)</option>
+              <option value="fr">French (fr)</option>
+              <option value="es">Spanish (es)</option>
+              <option value="it">Italian (it)</option>
+              <option value="pt">Portuguese (pt)</option>
+              <option value="nl">Dutch (nl)</option>
+              <option value="pl">Polish (pl)</option>
+              <option value="tr">Turkish (tr)</option>
+              <option value="ru">Russian (ru)</option>
+            </select>
+            <small class="hint">A second subtitle track in that language, same timing, chosen as the default in the MKV. One-time download of the translation model (3 GB). Quick on an NVIDIA card, very slow on the processor alone.</small>
+          </label>
           <label class="opt"><input type="checkbox" id="opt-speakers" />
             <span>Mark speaker changes<small>A new subtitle when the voice changes; quick exchanges share one as “- ” lines. Takes a little longer (runs on the processor).</small></span></label>
           <hr class="sep" />
@@ -708,7 +725,7 @@ function itemHtml(it, page) {
     if (status === "working" || status === "analysing") {
       let s = L.stageText(r.stage);
       if (r.tracks > 1 && r.track) s += " · track " + r.track + "/" + r.tracks;
-      if (r.stage === "transcribe" || r.stage === "speakers") s += " · " + Math.floor(r.pct * 100) + "%";
+      if (r.stage === "transcribe" || r.stage === "speakers" || r.stage === "translate") s += " · " + Math.floor(r.pct * 100) + "%";
       if (r.eta > 0) s += " · " + L.formatDuration(r.eta) + " left";
       meta += "<span>" + L.escapeHtml(s) + "</span>";
     }
@@ -821,7 +838,7 @@ const optionIds = ["opt-translate", "opt-speakers", "opt-srtonly", "opt-lean", "
 let outDir = "";
 
 function saveOptions() {
-  const o = { lang: $("opt-lang").value, other: $("opt-lang-other").value, outmode: $("opt-outmode").value, outDir, channel: $("opt-channel").value };
+  const o = { lang: $("opt-lang").value, other: $("opt-lang-other").value, outmode: $("opt-outmode").value, outDir, channel: $("opt-channel").value, to: $("opt-to").value };
   optionIds.forEach((id) => { o[id] = $(id).checked; });
   store("ss.options", o);
 }
@@ -835,6 +852,7 @@ function restoreOptions() {
   outDir = o.outDir || "";
   $("opt-outmode").value = o.outmode === "folder" && outDir ? "folder" : "beside";
   $("opt-channel").value = o.channel || "";
+  $("opt-to").value = o.to || "";
 }
 
 // resetOptions: the standard choices — detect the language, silence filter
@@ -843,6 +861,7 @@ function resetOptions() {
   $("opt-lang").value = "";
   $("opt-lang-other").value = "";
   $("opt-channel").value = "";
+  $("opt-to").value = "";
   $("opt-outmode").value = "beside";
   optionIds.forEach((id) => { $(id).checked = id === "opt-vad"; });
   syncOptionUI();
@@ -873,7 +892,8 @@ function readOptions() {
     auto: $("opt-auto").checked,
     force: $("opt-force").checked,
     outDir: $("opt-outmode").value === "folder" ? outDir : "",
-    channel: $("opt-channel").value
+    channel: $("opt-channel").value,
+    translateTo: $("opt-to").value
   };
 }
 
@@ -891,7 +911,7 @@ function setRunning(running, stopping) {
   $("split-stop").disabled = !running || state.kind !== "split";
   ["sub-add-files", "sub-add-folder", "sub-clear", "merge-add-files", "merge-clear", "split-add-files", "split-add-folder",
     "split-clear", "split-track", "opt-reset", "about-setup-run", "about-download", "settings-defaults", "cleaner-defaults"].forEach((id) => { $(id).disabled = running; });
-  optionIds.concat(["opt-lang", "opt-lang-other", "opt-outmode", "opt-channel"]).forEach((id) => { $(id).disabled = running; });
+  optionIds.concat(["opt-lang", "opt-lang-other", "opt-outmode", "opt-channel", "opt-to"]).forEach((id) => { $(id).disabled = running; });
   if (!running) syncOptionUI();
 }
 
@@ -1458,7 +1478,7 @@ async function init() {
     $(id).addEventListener("wheel", () => { lastUserScroll[page] = Date.now(); }, { passive: true });
   });
 
-  optionIds.concat(["opt-lang", "opt-lang-other", "opt-channel"]).forEach((id) => {
+  optionIds.concat(["opt-lang", "opt-lang-other", "opt-channel", "opt-to"]).forEach((id) => {
     $(id).addEventListener("change", () => { syncOptionUI(); saveOptions(); });
   });
   $("opt-outmode").addEventListener("change", async () => {

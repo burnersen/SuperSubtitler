@@ -35,9 +35,14 @@ type wordTS struct {
 // frame-accurate against the original. turns (speaker recognition, in the
 // WAV's timeline like the words) may be nil: then no speaker is marked.
 func buildSRT(wj *whisperJSON, leadinSec float64, s AppSettings, turns []speakerTurn) string {
+	return renderSRT(buildCues(wj, leadinSec, s, turns))
+}
+
+// buildCues is buildSRT before rendering: the finished, timed subtitles.
+func buildCues(wj *whisperJSON, leadinSec float64, s AppSettings, turns []speakerTurn) []cue {
 	words := collectWords(wj, leadinSec)
 	if len(words) == 0 {
-		return ""
+		return nil
 	}
 	if len(turns) > 0 {
 		assignSpeakers(words, shiftTurns(turns, leadinSec))
@@ -45,7 +50,7 @@ func buildSRT(wj *whisperJSON, leadinSec float64, s AppSettings, turns []speaker
 	cues := groupCues(words, s)
 	cues = mergeDialogue(cues, s)
 	enforceTiming(cues, s)
-	return renderSRT(cues)
+	return cues
 }
 
 func collectWords(wj *whisperJSON, leadinSec float64) []wordTS {

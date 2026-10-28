@@ -64,6 +64,12 @@ OPTIONS
                    everything, including pauses).
   -lowmem          Use a smaller compute type (less video
                    memory, a bit slower).
+  -to:XX           Also write the subtitles in language XX
+                   (e.g. -to:de, -to:de,fr): own track in the
+                   MKV (the default one) and own .srt, same
+                   timing. Loads the translation model (3 GB)
+                   the first time; quick on an NVIDIA card,
+                   very slow on the processor alone.
   -speakers        Mark speaker changes: a new subtitle starts
                    when the voice changes, and a quick exchange
                    shares one subtitle as "- " lines. Loads a

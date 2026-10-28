@@ -9,6 +9,8 @@ Invoked by the Go front-end as:
     python.exe transcribe.py [--flag value ...] WAV [WAV ...]
     python.exe transcribe.py --prefetch --model_dir DIR MODEL [MODEL ...]
     python.exe transcribe.py --diarize --segmentation F [--threshold T] --output F WAV
+    python.exe transcribe.py --translate_text --model_dir D --tokenizer F --target L
+                             --input F --output F [--device D --compute_type T]
 
 The second form only downloads the models (one-time setup, so the download
 happens with visible progress instead of inside the first transcription) and
@@ -18,6 +20,10 @@ The third form finds the moments the speaking voice changes (see
 speaker_changes) and writes {"changes": [t, ...], "turns": [{start, end,
 speaker}]} in the WAV's timeline; it needs only onnxruntime and numpy, which
 the engine brings anyway, and never loads the speech model.
+
+The fourth form translates subtitle text (see translate_text): {"texts": [...]}
+in, {"translations": [...]} out, same order. MADLAD-400 through CTranslate2
+and the tokenizers package - both come with the engine.
 
 It mirrors the flag set centralised in Whisper.go and writes, for every input
 WAV, an "<output_dir>/<basename>.json" file with exactly the shape the Go side
@@ -316,12 +322,83 @@ def diarize():
     sys.stdout.flush()
 
 
+# Translation ------------------------------------------------------------------
+#
+# MADLAD-400 3B (Google, Apache 2.0) translates between some 400 languages; the
+# source language needs no naming, only the target, as a "<2xx>" tag in front.
+# Measured on FLORES-200 against human translations it beat the per-pair
+# OPUS-MT models and M2M100 clearly (en->de chrF 67.7 vs 63.8 and 62.2). Every
+# text is one unit - a sentence or a few - so the model sees its context.
+
+def _batched(items, size):
+    for i in range(0, len(items), size):
+        yield i, items[i:i + size]
+
+
+def translate_texts(texts, translator, tokenizer, target, batch, progress=None):
+    """Translations of texts, same order. Equal texts are translated once;
+    texts are sorted by length so a batch pads little."""
+    import re
+    norm = [re.sub(r"\s+", " ", t).strip() for t in texts]
+    unique = sorted({t for t in norm if t}, key=len)
+    done = {}
+    for i, chunk in _batched(unique, batch):
+        tokens = [tokenizer.encode("<2%s> %s" % (target, t), add_special_tokens=False).tokens + ["</s>"]
+                  for t in chunk]
+        results = translator.translate_batch(tokens, beam_size=4, max_decoding_length=512,
+                                             repetition_penalty=1.1)
+        for t, r in zip(chunk, results):
+            ids = [tokenizer.token_to_id(tok) for tok in r.hypotheses[0]]
+            done[t] = tokenizer.decode([x for x in ids if x is not None]).strip()
+        if progress:
+            progress(min(1.0, (i + len(chunk)) / max(1, len(unique))))
+    return [done.get(t, "") for t in norm]
+
+
+def translate_text():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--translate_text", action="store_true")
+    p.add_argument("--model_dir", required=True)
+    p.add_argument("--tokenizer", required=True)
+    p.add_argument("--target", required=True)
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--compute_type", default="int8_float16")
+    p.add_argument("--input", required=True)
+    p.add_argument("--output", required=True)
+    args = p.parse_args()
+    if args.device == "cuda":
+        _register_cuda_dlls()
+    import ctranslate2
+    from tokenizers import Tokenizer
+    try:
+        translator = ctranslate2.Translator(args.model_dir, device=args.device, compute_type=args.compute_type,
+                                            intra_threads=max(1, min(os.cpu_count() or 1, 8)))
+    except Exception as e:
+        sys.stderr.write("CUDA/GPU init failed on device=%s: %s\n" % (args.device, e))
+        raise
+    tokenizer = Tokenizer.from_file(args.tokenizer)
+    texts = json.load(open(args.input, encoding="utf-8"))["texts"]
+
+    def progress(frac):
+        sys.stdout.write("@PROGRESS %.4f\n" % frac)
+        sys.stdout.flush()
+
+    out = translate_texts(texts, translator, tokenizer, args.target, 32 if args.device == "cuda" else 8, progress)
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump({"translations": out}, f, ensure_ascii=False)
+    sys.stdout.write("@PROGRESS 1.0000\n")
+    sys.stdout.flush()
+
+
 def main():
     if "--prefetch" in sys.argv[1:]:
         prefetch()
         return
     if "--diarize" in sys.argv[1:]:
         diarize()
+        return
+    if "--translate_text" in sys.argv[1:]:
+        translate_text()
         return
     args = parse_args()
     _register_cuda_dlls()

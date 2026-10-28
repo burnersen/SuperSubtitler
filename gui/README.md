@@ -34,6 +34,9 @@ Every decision about a file (language, timing, layout) stays in the CLI.
   when the batch is done.
 - 🧩 **Merge page** — one video plus audio/subtitle files → `.joined.mkv`,
   lossless.
+- 🔤 **Also as subtitles in** — pick a language on the Subtitle page (`-to:XX`):
+  a second subtitle track and `.srt` in that language, same timing, the
+  default track in the MKV. Translated locally (MADLAD-400, 3 GB one-time).
 - 🗨️ **Mark speaker changes** — tick it on the Subtitle page (`-speakers`): a
   new subtitle starts when the voice changes, quick exchanges share one as
   `- ` lines. Each file shows how many speaker changes were found; how sure a

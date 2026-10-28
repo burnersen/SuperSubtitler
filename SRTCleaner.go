@@ -104,6 +104,18 @@ func cleanSRT(srt string, r cleanerRules) string {
 	return b.String()
 }
 
+// filterCues drops the cues the cleaner rules match (cleanSRT on cues, before
+// they are rendered or translated).
+func filterCues(cues []cue, r cleanerRules) []cue {
+	var kept []cue
+	for _, c := range cues {
+		if !cueMatches(c.lines, r) {
+			kept = append(kept, c)
+		}
+	}
+	return kept
+}
+
 func cueMatches(textLines []string, r cleanerRules) bool {
 	joined := strings.ToLower(strings.TrimSpace(strings.Join(textLines, " ")))
 	if joined == "" {

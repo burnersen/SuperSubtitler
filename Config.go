@@ -69,27 +69,29 @@ type AppSettings struct {
 // AppConfig holds per-run flag state. Populated once in main, then passed by
 // value/pointer; no global mutation.
 type AppConfig struct {
-	forcedTrack   int    // 1-based audio stream, 0 = auto
-	forcedChannel int    // 0-based physical channel, -1 = auto
-	forcedLang    string // ISO code, "" = auto
-	translate     bool   // -translate: translate everything to English
-	split         bool   // -split: export each audio channel as WAV, skip transcription
-	speakers      bool   // -speakers: mark speaker changes in the subtitles
-	srtOnly       bool   // -srtonly: write only the .srt, no MKV
-	lean          bool   // -lean: drop foreign streams, keep video + chosen audio
-	noVad         bool   // -novad: disable the silence filter
-	lowMem        bool   // -lowmem: smaller compute type
-	auto          bool   // -auto: never ask, take every default answer
-	force         bool   // -force: redo files that already have subtitles
-	outDir        string // -out:<dir>: write results there instead of next to the source
-	noWait        bool   // -nowait: no "Press Enter" at the end
-	json          bool   // -json: machine-readable events on stdout
-	setup         bool   // -setup: install everything (incl. models), then exit
-	noMerge       bool   // -nomerge: never offer merge mode, subtitle every input
-	checkConfig   string // -checkconfig:FILE: validate an INI, print ok/invalid, exit
-	printDefaults bool   // -printdefaults: print the default INI, exit
-	version       bool   // -version: print the version and exit
-	help          bool   // -help: show usage and exit
+	forcedTrack   int      // 1-based audio stream, 0 = auto
+	forcedChannel int      // 0-based physical channel, -1 = auto
+	forcedLang    string   // ISO code, "" = auto
+	translate     bool     // -translate: translate everything to English
+	split         bool     // -split: export each audio channel as WAV, skip transcription
+	speakers      bool     // -speakers: mark speaker changes in the subtitles
+	translateTo   []string // -to:de,fr: also write the subtitles in these languages
+	badTargets    []string // -to: entries that are no language code
+	srtOnly       bool     // -srtonly: write only the .srt, no MKV
+	lean          bool     // -lean: drop foreign streams, keep video + chosen audio
+	noVad         bool     // -novad: disable the silence filter
+	lowMem        bool     // -lowmem: smaller compute type
+	auto          bool     // -auto: never ask, take every default answer
+	force         bool     // -force: redo files that already have subtitles
+	outDir        string   // -out:<dir>: write results there instead of next to the source
+	noWait        bool     // -nowait: no "Press Enter" at the end
+	json          bool     // -json: machine-readable events on stdout
+	setup         bool     // -setup: install everything (incl. models), then exit
+	noMerge       bool     // -nomerge: never offer merge mode, subtitle every input
+	checkConfig   string   // -checkconfig:FILE: validate an INI, print ok/invalid, exit
+	printDefaults bool     // -printdefaults: print the default INI, exit
+	version       bool     // -version: print the version and exit
+	help          bool     // -help: show usage and exit
 	unknownFlags  []string
 	inputArgs     []string
 }

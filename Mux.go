@@ -16,6 +16,7 @@ import (
 type subInput struct {
 	path string
 	lang string
+	def  bool // the default subtitle track (a translation the user asked for)
 }
 
 // buildMKV soft-muxes one or more SRT sidecars into srcVideo, each as a
@@ -39,10 +40,25 @@ func buildMKV(ctx context.Context, cfg *AppConfig, srcVideo string, subs []subIn
 		args = append(args, "-map", fmt.Sprintf("%d:0", i+1))
 	}
 	args = append(args, "-c", "copy", "-c:s", "srt")
-	for i, s := range subs {
-		args = append(args, fmt.Sprintf("-metadata:s:s:%d", i), "language="+s.lang)
+	// Without -lean the source's own subtitle tracks come first: ours are
+	// numbered after them.
+	first := 0
+	if !cfg.lean {
+		if pd, err := probeFile(ctx, srcVideo); err == nil {
+			first = pd.subtitleCount()
+		}
 	}
-	args = append(args, "-disposition:s:0", "default", outPath)
+	def := first
+	for i, s := range subs {
+		args = append(args, fmt.Sprintf("-metadata:s:s:%d", first+i), "language="+s.lang)
+		if s.def && def == first {
+			def = first + i
+		}
+	}
+	for i := 0; i < first; i++ {
+		args = append(args, fmt.Sprintf("-disposition:s:%d", i), "0")
+	}
+	args = append(args, fmt.Sprintf("-disposition:s:%d", def), "default", outPath)
 
 	if _, err := runProcess(ctx, ffmpegPath, args...); err != nil {
 		return fmt.Errorf("Mux.go: buildMKV: %w", err)

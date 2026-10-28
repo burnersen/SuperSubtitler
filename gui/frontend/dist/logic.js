@@ -169,6 +169,7 @@
     extract: "Extracting audio",
     transcribe: "Transcribing",
     speakers: "Finding speaker changes",
+    translate: "Translating",
     mux: "Building the MKV"
   };
 
@@ -176,9 +177,24 @@
     return STAGES[stage] || stage || "";
   }
 
-  // Share of a row's bar for transcribing when speakers are marked too (the
-  // speaker changes are the much quicker rest).
-  const TRANSCRIBE_SHARE = 0.85;
+  // The bar of a row: transcribing first, then (if asked for) the speaker
+  // changes and the translation, each in its own share of the bar.
+  const PHASE_WEIGHT = { transcribe: 0.7, speakers: 0.1, translate: 0.2 };
+
+  function phaseFraction(model, stage, frac) {
+    const phases = ["transcribe"];
+    if (model.speakers) phases.push("speakers");
+    if (model.translate) phases.push("translate");
+    if (phases.length === 1) return frac;
+    let total = 0;
+    phases.forEach((p) => { total += PHASE_WEIGHT[p]; });
+    let before = 0;
+    for (const p of phases) {
+      if (p === stage) return (before + PHASE_WEIGHT[p] * frac) / total;
+      before += PHASE_WEIGHT[p];
+    }
+    return frac;
+  }
 
   function speakersText(n) {
     return n === 1 ? "1 speaker change" : (n || 0) + " speaker changes";
@@ -197,6 +213,7 @@
       rows: {},          // id → state
       order: rows.map((r) => r.id),
       speakers: false,   // the run marks speaker changes (-speakers)
+      translate: false,  // the run translates the subtitles (-to)
       setup: null,
       question: null,
       summary: null,
@@ -225,6 +242,7 @@
         model.indexToRow = {}; // numbering restarts with every process
         model.batchFiles = ev.files || 0;
         model.speakers = !!ev.speakers;
+        model.translate = Array.isArray(ev.to) && ev.to.length > 0;
         return null;
       case "setup":
         model.setup = ev.step === "ready" ? null : {
@@ -263,7 +281,7 @@
         if (r.status === "failed" || r.status === "done") return id;
         r.stage = ev.stage;
         if (ev.track) r.track = ev.track;
-        if (ev.stage === "transcribe" || ev.stage === "speakers" || ev.stage === "mux" || ev.stage === "extract") r.status = "working";
+        if (ev.stage === "transcribe" || ev.stage === "speakers" || ev.stage === "translate" || ev.stage === "mux" || ev.stage === "extract") r.status = "working";
         return id;
       }
       case "lang": {
@@ -282,16 +300,13 @@
         const tracks = Math.max(1, ev.tracks || r.tracks);
         const track = Math.min(Math.max(1, ev.track || 1), tracks);
         const pct = Math.min(Math.max(Number(ev.pct) || 0, 0), 1);
-        const speakers = ev.stage === "speakers";
-        let frac = (track - 1 + pct) / tracks;
-        // With speaker marking every track is transcribed first, then its
-        // voices are told apart: the bar gives each phase its share.
-        if (model.speakers) frac = speakers ? TRANSCRIBE_SHARE + (1 - TRANSCRIBE_SHARE) * frac : TRANSCRIBE_SHARE * frac;
+        const stage = ev.stage === "speakers" || ev.stage === "translate" ? ev.stage : "transcribe";
+        const frac = phaseFraction(model, stage, (track - 1 + pct) / tracks);
         // Never let a bar run backwards: a late duplicate line must not undo.
         r.pct = Math.max(r.pct, frac);
         r.eta = ev.eta_sec || 0;
         r.status = "working";
-        r.stage = speakers ? "speakers" : "transcribe";
+        r.stage = stage;
         return id;
       }
       case "speakers": {

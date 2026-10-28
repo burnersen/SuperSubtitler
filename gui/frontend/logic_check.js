@@ -85,11 +85,11 @@ check("speaker marking: the bar shares transcription and speakers, the changes a
   L.applyEvent(m, { ev: "run", files: 1, speakers: true });
   L.applyEvent(m, { ev: "file", index: 1, path: "C:\\V\\A.mkv", tracks: [{}] });
   L.applyEvent(m, { ev: "progress", index: 1, track: 1, tracks: 1, pct: 1 });
-  assert.strictEqual(m.rows[1].pct, 0.85, "transcription fills its share only");
+  assert.ok(Math.abs(m.rows[1].pct - 0.875) < 1e-9, "transcription fills its share only: " + m.rows[1].pct);
   L.applyEvent(m, { ev: "stage", index: 1, track: 1, stage: "speakers" });
   assert.strictEqual(L.stageText(m.rows[1].stage), "Finding speaker changes");
   L.applyEvent(m, { ev: "progress", index: 1, track: 1, tracks: 1, pct: 0.5, stage: "speakers" });
-  assert.ok(Math.abs(m.rows[1].pct - 0.925) < 1e-9, String(m.rows[1].pct));
+  assert.ok(Math.abs(m.rows[1].pct - 0.9375) < 1e-9, String(m.rows[1].pct));
   assert.strictEqual(m.rows[1].stage, "speakers");
   L.applyEvent(m, { ev: "speakers", index: 1, track: 1, changes: 37 });
   assert.deepStrictEqual(m.rows[1].speakers, ["37 speaker changes"]);
@@ -101,6 +101,19 @@ check("speaker marking: the bar shares transcription and speakers, the changes a
   L.applyEvent(plain, { ev: "file", index: 1, path: "C:\\V\\A.mkv" });
   L.applyEvent(plain, { ev: "progress", index: 1, pct: 1 });
   assert.strictEqual(plain.rows[1].pct, 1, "without speaker marking transcription is the whole bar");
+});
+
+check("translation gets its share of the bar after the speakers", () => {
+  const m = run();
+  L.applyEvent(m, { ev: "run", files: 1, speakers: true, to: ["de"] });
+  L.applyEvent(m, { ev: "file", index: 1, path: "C:\\V\\A.mkv", tracks: [{}] });
+  L.applyEvent(m, { ev: "progress", index: 1, track: 1, tracks: 1, pct: 1 });
+  assert.ok(Math.abs(m.rows[1].pct - 0.7) < 1e-9, String(m.rows[1].pct));
+  L.applyEvent(m, { ev: "progress", index: 1, track: 1, tracks: 1, pct: 1, stage: "speakers" });
+  assert.ok(Math.abs(m.rows[1].pct - 0.8) < 1e-9, String(m.rows[1].pct));
+  L.applyEvent(m, { ev: "progress", index: 1, track: 1, tracks: 1, pct: 0.5, stage: "translate" });
+  assert.ok(Math.abs(m.rows[1].pct - 0.9) < 1e-9, String(m.rows[1].pct));
+  assert.strictEqual(L.stageText(m.rows[1].stage), "Translating");
 });
 
 check("numbering restarts with every process (batches)", () => {
