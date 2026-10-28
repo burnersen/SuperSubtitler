@@ -430,51 +430,6 @@ func installPinnedWheels(ctx context.Context, pyExe string, spinner *pterm.Spinn
 		"--require-hashes", "--only-binary=:all:", "-r", req.Name())
 }
 
-// speakerPackageSpec is what an expert's own (unpinned) engine gets for
-// speaker marking: the newest version, like the engine itself.
-const speakerPackageSpec = "sherpa-onnx"
-
-// ensureSpeakerEngine adds the speaker-marking package (sherpa-onnx, about
-// 19 MB) to the installed Python the first time it is needed. It has its own
-// marker, so the engine itself is never reinstalled for it.
-func ensureSpeakerEngine(ctx context.Context, pythonDir string) error {
-	pyExe := filepath.Join(pythonDir, "python.exe")
-	marker := filepath.Join(pythonDir, ".ss_speakers")
-	pinned := usesPinnedEngine(appSettings)
-	want := speakerPackageSpec
-	if pinned {
-		want = pins.groupLockID("speakers")
-	}
-	if markerMatches(marker, want) {
-		return nil
-	}
-	label := "Installing speaker recognition"
-	spinner, _ := pterm.DefaultSpinner.WithText(label + " (one-time)...").Start()
-	stop := func() {
-		if spinner != nil {
-			_ = spinner.Stop()
-			spinner = nil
-		}
-	}
-	defer stop()
-	var err error
-	if pinned {
-		err = installPinnedWheels(ctx, pyExe, spinner, "speakers", label+" (tested set)", pins.groupPackages("speakers"))
-	} else {
-		err = runPip(ctx, pyExe, spinner, "speakers", label, "--upgrade", speakerPackageSpec)
-	}
-	if err != nil {
-		return fmt.Errorf("Downloader.go: ensureSpeakerEngine: %w", err)
-	}
-	if err := os.WriteFile(marker, []byte(want), 0644); err != nil {
-		return fmt.Errorf("Downloader.go: ensureSpeakerEngine (marker): %w", err)
-	}
-	stop()
-	pOK.Println("Speaker recognition ready.")
-	emitSetup("speakers", "done", "Speaker recognition ready", 0, 0, 0)
-	return nil
-}
-
 // runPip runs "pip install" and shows what pip is doing (Collecting …,
 // Downloading … (664.8 MB), Installing …) live, with the elapsed time, instead
 // of one unchanging spinner line for many minutes. No stall watchdog: a single

@@ -267,25 +267,16 @@ func TestNewSettingLimits(t *testing.T) {
 }
 
 func TestSpeakerFlagsAndSettings(t *testing.T) {
-	if cfg := parseArgs([]string{"-speakers"}); !cfg.speakers || cfg.speakerCount != 0 {
+	if cfg := parseArgs([]string{"-speakers"}); !cfg.speakers {
 		t.Errorf("-speakers: %+v", cfg)
 	}
-	if cfg := parseArgs([]string{"-Speakers:3"}); !cfg.speakers || cfg.speakerCount != 3 {
-		t.Errorf("-speakers:3: %+v", cfg)
+	if cfg := parseArgs([]string{"-Speakers:3"}); !cfg.speakers || len(cfg.unknownFlags) != 0 {
+		t.Errorf("0.3.x's -speakers:N must still switch it on: %+v", cfg)
 	}
-	if cfg := parseArgs([]string{"-speakers:x"}); !cfg.speakers || cfg.speakerCount != 0 {
-		t.Errorf("-speakers:x must fall back to automatic: %+v", cfg)
-	}
-	for _, bad := range []string{"speaker_threshold=0.2", "speaker_threshold=1.6", "speaker_count=-1", "speaker_count=21"} {
+	for _, bad := range []string{"speaker_change_threshold=0.01", "speaker_change_threshold=0.95"} {
 		if settingsProblem(parseSettings(bad)) == "" {
 			t.Errorf("%s must be refused", bad)
 		}
-	}
-	s := appSettings
-	defer func() { appSettings = s }()
-	appSettings.speakerCount = 4
-	if speakerCountFor(&AppConfig{}) != 4 || speakerCountFor(&AppConfig{speakerCount: 2}) != 2 {
-		t.Error("-speakers:N must win over speaker_count, which applies otherwise")
 	}
 }
 
@@ -293,27 +284,33 @@ func TestModelsNeededWithSpeakers(t *testing.T) {
 	s := appSettings
 	defer func() { appSettings = s }()
 	appSettings.detectModel, appSettings.modelTranscribe = "turbo", "turbo"
-	want := []string{"turbo", speakerSegmentationModel, speakerEmbeddingModel}
+	want := []string{"turbo", speakerSegmentationModel}
 	if got := modelsNeeded(&AppConfig{speakers: true}); !reflect.DeepEqual(got, want) {
 		t.Errorf("-speakers = %q", got)
 	}
 	if got := modelsNeeded(&AppConfig{setup: true}); !reflect.DeepEqual(got, want) {
-		t.Errorf("-setup must install the speaker models too, got %q", got)
+		t.Errorf("-setup must install the speaker model too, got %q", got)
 	}
-	for _, m := range want[1:] {
-		if _, ok := pins.Models[m]; !ok {
-			t.Errorf("%s is not pinned", m)
-		}
+	if _, ok := pins.Models[speakerSegmentationModel]; !ok {
+		t.Error("the speaker model is not pinned")
 	}
 }
 
-func TestMigrateOldSpeakerThreshold(t *testing.T) {
-	want := "speaker_threshold=" + strconv.FormatFloat(defaultSettings().speakerThreshold, 'f', 2, 64)
-	out, changed := migrateSettings("[speakers]\r\nspeaker_threshold=0.50\r\nspeaker_count=0\r\n")
-	if !changed || !strings.Contains(out, want+"\r\n") || !strings.Contains(out, "speaker_count=0") {
-		t.Errorf("0.3.0's default must move to the current one:\n%q", out)
+func TestMigrateOldSpeakerSettings(t *testing.T) {
+	old := "[subtitles]\r\nsub_gap_split_ms=500\r\n\r\n[speakers]\r\n# Only used with -speakers: old text\r\n" +
+		"speaker_threshold=0.95\r\nspeaker_count=3\r\n"
+	out, changed := migrateSettings(old)
+	want := "speaker_change_threshold=" + strconv.FormatFloat(defaultSettings().speakerChangeThreshold, 'f', 2, 64)
+	if !changed || strings.Contains(out, "speaker_threshold") || strings.Contains(out, "speaker_count") ||
+		!strings.Contains(out, want+"\r\n") || !strings.Contains(out, "sub_gap_split_ms=500\r\n") ||
+		strings.Count(out, "[speakers]") != 1 || strings.Contains(out, "old text") {
+		t.Errorf("0.3.x's [speakers] section must be replaced, the rest kept:\n%q", out)
 	}
-	if _, changed := migrateSettings("speaker_threshold=0.65\n"); changed {
-		t.Error("a value the user chose must stay")
+	if got := parseSettings(out); got != defaultSettings() || settingsProblem(got) != "" {
+		t.Errorf("migrated file = %+v", got)
+	}
+	cur := defaultConfigText()
+	if _, changed := migrateSettings(cur); changed {
+		t.Error("a current file must stay as it is")
 	}
 }

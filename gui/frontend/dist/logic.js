@@ -168,7 +168,7 @@
     detect: "Detecting the language",
     extract: "Extracting audio",
     transcribe: "Transcribing",
-    speakers: "Telling speakers apart",
+    speakers: "Finding speaker changes",
     mux: "Building the MKV"
   };
 
@@ -177,11 +177,11 @@
   }
 
   // Share of a row's bar for transcribing when speakers are marked too (the
-  // speaker recognition is the much quicker rest).
+  // speaker changes are the much quicker rest).
   const TRANSCRIBE_SHARE = 0.85;
 
   function speakersText(n) {
-    return n === 1 ? "1 speaker" : (n || 0) + " speakers";
+    return n === 1 ? "1 speaker change" : (n || 0) + " speaker changes";
   }
 
   // createRun starts the bookkeeping for one window run. rows are the queue
@@ -298,8 +298,8 @@
         const id = rowOf(ev.index);
         if (id === undefined) return null;
         const r = rowState(model, id);
-        r.speakers[(ev.track || 1) - 1] = ev.message ? "no speaker marks" : speakersText(ev.count);
-        if (ev.message) r.speakerNote = "speaker recognition failed: " + ev.message;
+        r.speakers[(ev.track || 1) - 1] = ev.message ? "no speaker marks" : speakersText(ev.changes);
+        if (ev.message) r.speakerNote = "finding speaker changes failed: " + ev.message;
         return id;
       }
       case "question":
@@ -371,8 +371,7 @@
     pip: "pip",
     engine: "Whisper engine",
     cuda: "CUDA libraries",
-    model: "Speech model",
-    speakers: "Speaker recognition"
+    model: "Speech model"
   };
 
   // setupText renders the setup panel line; pct is null when the size is

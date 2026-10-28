@@ -290,45 +290,8 @@ func TestReuseCachedBlob(t *testing.T) {
 	}
 }
 
-func TestSpeakerGroupStaysOutOfTheEngine(t *testing.T) {
-	sp := pins.groupPackages("speakers")
-	names := map[string]bool{}
-	for _, p := range sp {
-		names[p.Name] = true
-		if p.CUDA {
-			t.Errorf("%s: the speaker group needs no CUDA", p.Name)
-		}
-	}
-	if !names["sherpa-onnx"] || !names["sherpa-onnx-core"] || len(sp) != 2 {
-		t.Errorf("speaker group = %+v", sp)
-	}
-	// Optional groups must not change the engine's set (or its lock id, which
-	// would reinstall everything, CUDA included, for every user).
-	if core := pins.requirementsText(false) + pins.requirementsText(true); strings.Contains(core, "sherpa") {
-		t.Errorf("sherpa leaked into the engine set:\n%s", core)
-	}
-	if id := pins.groupLockID("speakers"); !strings.HasSuffix(id, "|speakers") || id == pins.lockID(false) {
-		t.Errorf("groupLockID = %q", id)
-	}
-	for _, m := range []string{speakerSegmentationModel, speakerEmbeddingModel} {
-		pm := pins.Models[m]
-		if !pm.Mirror || len(pm.Revision) != 40 {
-			t.Errorf("%s: %+v", m, pm)
-		}
-		onnx := 0
-		for _, f := range pm.Files {
-			if strings.HasSuffix(f.Name, ".onnx") {
-				onnx++
-			}
-		}
-		if onnx != 1 {
-			t.Errorf("%s must have exactly one .onnx file (speakerModelFile picks it), has %d", m, onnx)
-		}
-	}
-}
-
 func TestModelMarkerFollowsTheFiles(t *testing.T) {
-	pm := pins.Models["speaker-embedding"]
+	pm := pins.Models["speaker-segmentation"]
 	other := pm
 	other.Files = append([]modelFile{}, pm.Files...)
 	other.Files[0].SHA256 = strings.Repeat("0", 64)

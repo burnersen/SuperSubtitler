@@ -66,10 +66,8 @@ OPTIONS
                    memory, a bit slower).
   -speakers        Mark speaker changes: a new subtitle starts
                    when the voice changes, and a quick exchange
-                   shares one subtitle as "- " lines. Installs
-                   a small extra (about 55 MB) the first time.
-  -speakers:N      The same for exactly N speakers - when you
-                   know how many people speak.
+                   shares one subtitle as "- " lines. Loads a
+                   small model (6 MB) the first time.
   -split           Export every audio channel as a separate
                    WAV so you can listen and find where the
                    speech is; skips transcription.

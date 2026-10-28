@@ -8,17 +8,16 @@ Invoked by the Go front-end as:
 
     python.exe transcribe.py [--flag value ...] WAV [WAV ...]
     python.exe transcribe.py --prefetch --model_dir DIR MODEL [MODEL ...]
-    python.exe transcribe.py --diarize --segmentation F --embedding F --output F WAV
+    python.exe transcribe.py --diarize --segmentation F [--threshold T] --output F WAV
 
 The second form only downloads the models (one-time setup, so the download
 happens with visible progress instead of inside the first transcription) and
 prints "@MODELPATH <name><TAB><folder>" for each.
 
-The third form tells speakers apart (sherpa-onnx) and writes {"turns": [{start,
-end, speaker}]} in the WAV's timeline. It always runs in a process of its own:
-sherpa-onnx brings its own onnxruntime.dll, and two different onnxruntime
-builds in one process (faster-whisper's silence filter uses the other one) do
-not mix.
+The third form finds the moments the speaking voice changes (see
+speaker_changes) and writes {"changes": [t, ...], "turns": [{start, end,
+speaker}]} in the WAV's timeline; it needs only onnxruntime and numpy, which
+the engine brings anyway, and never loads the speech model.
 
 It mirrors the flag set centralised in Whisper.go and writes, for every input
 WAV, an "<output_dir>/<basename>.json" file with exactly the shape the Go side
@@ -185,80 +184,133 @@ def prefetch():
         sys.stdout.flush()
 
 
-def read_wav_float(path, rate):
-    """16-bit mono PCM -> float32 in [-1, 1), converted in slices so a long
-    film does not need a second full-size copy in memory."""
+# Speaker changes ------------------------------------------------------------
+#
+# The pyannote segmentation 3.0 model looks at 10 seconds at a time and tells,
+# for every 17 ms, which of up to three voices in that stretch is speaking. It
+# is trained to tell voices apart exactly there - including a one-second
+# reply - while it knows nothing about who is who across the film. Subtitles
+# need only that: where the voice changes. Windows start every second, so each
+# moment is seen by about nine of them; a change counts when enough of those
+# that see it well (not at their very edge) agree. Measured with the speaker
+# benchmark (.github/workflows/speaker-benchmark.yml) on hand-labelled
+# recordings, this finds more changes - above all short ones - than telling
+# voices apart across the film, at the same precision and many times faster.
+
+SEG_RATE = 16000
+SEG_WINDOW = 160000           # 10 s, what the model was trained on
+SEG_STEP = 16000              # a window every second
+SEG_SHIFT, SEG_FIELD = 270, 991   # frame hop and receptive field (samples)
+SEG_POWERSET = [(), (0,), (1,), (2,), (0, 1), (0, 2), (1, 2)]
+SEG_MIN_RUN = 0.1             # s of one voice before it counts
+SEG_EDGE = 0.5                # s at each window edge it cannot judge well
+SEG_MERGE = 0.3               # s: votes this close are one change
+
+
+def read_pcm16(path):
+    """16-bit mono 16 kHz PCM as int16 (converted per window later, so a long
+    film needs no float copy of all of it)."""
     import wave
     import numpy as np
     with wave.open(path, "rb") as w:
-        if w.getnchannels() != 1 or w.getsampwidth() != 2 or w.getframerate() != rate:
+        if w.getnchannels() != 1 or w.getsampwidth() != 2 or w.getframerate() != SEG_RATE:
             raise ValueError("%s: need 16-bit mono %d Hz, got %d channel(s), %d bytes, %d Hz"
-                             % (path, rate, w.getnchannels(), w.getsampwidth(), w.getframerate()))
-        n = w.getnframes()
-        out = np.empty(n, dtype=np.float32)
-        pos = 0
-        while pos < n:
-            raw = w.readframes(min(n - pos, 1 << 22))
-            if not raw:
-                break
-            chunk = np.frombuffer(raw, dtype="<i2")
-            out[pos:pos + len(chunk)] = chunk / 32768.0
-            pos += len(chunk)
-        return out[:pos]
+                             % (path, SEG_RATE, w.getnchannels(), w.getsampwidth(), w.getframerate()))
+        return np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
 
 
-def renumber(turns):
-    """Speaker numbers as they first appear (0, 1, 2 ...); the clustering
-    hands out arbitrary ones (0, 1, 6, 11)."""
-    order = {}
+def window_changes(logp):
+    """Change times (s, inside the window) from one window's output: the most
+    likely voice combination per frame, runs of one single voice, and a change
+    wherever the next such run belongs to another voice (overlap and silence
+    in between are skipped)."""
+    min_run = max(1, int(SEG_MIN_RUN * SEG_RATE / SEG_SHIFT))
+    voice = []
+    for c in logp.argmax(-1):
+        active = SEG_POWERSET[int(c)]
+        voice.append(active[0] if len(active) == 1 else -1)
+    runs = []
+    start = 0
+    for i in range(1, len(voice) + 1):
+        if i == len(voice) or voice[i] != voice[start]:
+            if voice[start] >= 0 and i - start >= min_run:
+                runs.append((voice[start], start, i))
+            start = i
+    t = lambda f: (f * SEG_SHIFT + SEG_FIELD / 2) / SEG_RATE  # noqa: E731
+    return [(t(a_end - 1) + t(b_start)) / 2
+            for (va, _, a_end), (vb, b_start, _) in zip(runs, runs[1:]) if va != vb]
+
+
+def speaker_changes(pcm, session, threshold, progress=None):
+    """Times (s) where the speaking voice changes. threshold: the share of the
+    windows that see a moment well which must find the change there."""
+    import numpy as np
+    n = len(pcm)
+    starts = list(range(0, max(n - SEG_WINDOW, 0) + 1, SEG_STEP))
+    if starts[-1] + SEG_WINDOW < n:
+        starts.append(n - SEG_WINDOW)
+    events = []
+    batch = 16
+    for i in range(0, len(starts), batch):
+        xs = np.zeros((len(starts[i:i + batch]), 1, SEG_WINDOW), dtype=np.float32)
+        for k, s in enumerate(starts[i:i + batch]):
+            x = pcm[s:s + SEG_WINDOW]
+            xs[k, 0, :len(x)] = x / 32768.0
+        for s, logp in zip(starts[i:i + batch], session.run(None, {"x": xs})[0]):
+            for t in window_changes(logp):
+                if SEG_EDGE <= t <= SEG_WINDOW / SEG_RATE - SEG_EDGE:
+                    events.append(s / SEG_RATE + t)
+        if progress:
+            progress(min(1.0, (i + batch) / len(starts)))
+    events.sort()
+    groups = []
+    for t in events:
+        if groups and t - groups[-1][-1] <= SEG_MERGE:
+            groups[-1].append(t)
+        else:
+            groups.append([t])
+    begin = np.array(starts) / SEG_RATE
+    span = SEG_WINDOW / SEG_RATE
     out = []
-    for t in sorted(turns, key=lambda t: (t["start"], t["end"])):
-        sp = order.setdefault(t["speaker"], len(order))
-        out.append({"start": round(t["start"], 3), "end": round(t["end"], 3), "speaker": sp})
+    for g in groups:
+        t = float(np.median(g))
+        # windows that see t well: start in [t - span + edge, t - edge]
+        seen = np.searchsorted(begin, t - SEG_EDGE, "right") - np.searchsorted(begin, t - span + SEG_EDGE, "left")
+        if seen > 0 and len(g) / seen >= threshold:
+            out.append(round(t, 3))
     return out
+
+
+def turns_from_changes(changes, duration):
+    """Stretches between the changes. The numbers only alternate (0, 1, 0 ...):
+    a change is known, who speaks is not - and a voice returning after a
+    single misjudged word then reads as the same voice again."""
+    edges = [0.0] + [c for c in changes if 0 < c < duration] + [duration]
+    return [{"start": round(a, 3), "end": round(b, 3), "speaker": i % 2}
+            for i, (a, b) in enumerate(zip(edges, edges[1:]))]
 
 
 def diarize():
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--diarize", action="store_true")
     p.add_argument("--segmentation", required=True)
-    p.add_argument("--embedding", required=True)
-    p.add_argument("--threshold", type=float, default=0.5)
-    p.add_argument("--num_speakers", type=int, default=0)
+    p.add_argument("--threshold", type=float, default=0.15)
     p.add_argument("--output", required=True)
     p.add_argument("wav")
     args = p.parse_args()
-    import sherpa_onnx
-    threads = max(1, min(os.cpu_count() or 1, 8))
-    config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
-        segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
-            pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=args.segmentation),
-            num_threads=threads,
-        ),
-        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=args.embedding, num_threads=threads),
-        # num_clusters > 0 fixes the count and ignores the threshold.
-        clustering=sherpa_onnx.FastClusteringConfig(
-            num_clusters=args.num_speakers if args.num_speakers > 0 else -1,
-            threshold=args.threshold,
-        ),
-        min_duration_on=0.3,
-        min_duration_off=0.5,
-    )
-    if not config.validate():
-        raise ValueError("speaker models not usable: %s / %s" % (args.segmentation, args.embedding))
-    sd = sherpa_onnx.OfflineSpeakerDiarization(config)
-    samples = read_wav_float(args.wav, sd.sample_rate)
+    import onnxruntime as ort
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = max(1, min(os.cpu_count() or 1, 8))
+    session = ort.InferenceSession(args.segmentation, opts, providers=["CPUExecutionProvider"])
+    pcm = read_pcm16(args.wav)
 
-    def progress(done, total):
-        if total > 0:
-            sys.stdout.write("@PROGRESS %.4f\n" % min(1.0, done / total))
-            sys.stdout.flush()
-        return 0  # 0 = go on
+    def progress(frac):
+        sys.stdout.write("@PROGRESS %.4f\n" % frac)
+        sys.stdout.flush()
 
-    result = sd.process(samples, callback=progress).sort_by_start_time()
-    turns = renumber([{"start": r.start, "end": r.end, "speaker": r.speaker} for r in result])
+    changes = speaker_changes(pcm, session, args.threshold, progress)
     with open(args.output, "w", encoding="utf-8") as f:
-        json.dump({"turns": turns}, f)
+        json.dump({"changes": changes, "turns": turns_from_changes(changes, len(pcm) / SEG_RATE)}, f)
     sys.stdout.write("@PROGRESS 1.0000\n")
     sys.stdout.flush()
 

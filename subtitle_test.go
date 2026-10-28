@@ -225,13 +225,10 @@ func TestMergeDialogueRespectsLimits(t *testing.T) {
 	}
 }
 
-func TestParseTurnsAndCount(t *testing.T) {
-	turns, err := parseTurns([]byte(`{"turns":[{"start":0.3,"end":4,"speaker":0},{"start":4.4,"end":6.9,"speaker":1},{"start":7,"end":9,"speaker":0}]}`))
-	if err != nil || len(turns) != 3 || turns[1].Speaker != 1 || turns[1].Start != 4.4 {
-		t.Fatalf("parseTurns = %+v, %v", turns, err)
-	}
-	if countSpeakers(turns) != 2 || countSpeakers(nil) != 0 {
-		t.Error("countSpeakers wrong")
+func TestParseSpeakerResult(t *testing.T) {
+	res, err := parseSpeakerResult([]byte(`{"changes":[4.2,6.95],"turns":[{"start":0,"end":4.2,"speaker":0},{"start":4.2,"end":6.95,"speaker":1},{"start":6.95,"end":9,"speaker":0}]}`))
+	if err != nil || len(res.Changes) != 2 || len(res.Turns) != 3 || res.Turns[1].Speaker != 1 || res.Turns[1].Start != 4.2 {
+		t.Fatalf("parseSpeakerResult = %+v, %v", res, err)
 	}
 	sh := shiftTurns([]speakerTurn{{Start: 5, End: 6, Speaker: 1}, {Start: 1, End: 2, Speaker: 0}}, 0.2)
 	if sh[0].Start != 0.8 || sh[1].Start != 4.8 {

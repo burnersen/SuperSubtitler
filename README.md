@@ -43,7 +43,7 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 - 🔇 **No "sticky" subtitles.** A voice-activity filter means a line shows up **only when someone actually speaks** and disappears in the silence — no caption frozen on screen through a quiet scene. This was the whole reason this tool exists.
 - 🌍 **International by default.** Every track is transcribed in **its own language** (German stays German, Spanish stays Spanish…). Add `-translate` to translate everything to English instead.
 - ⚡ **GPU-fast, CPU-safe.** Runs on your NVIDIA GPU via auto-installed CUDA libraries (a 1h45 film in ~80 seconds on a modern card), and falls back to the CPU automatically if there's no GPU.
-- 🗨️ **Who is speaking?** With `-speakers` the voices are told apart: a new subtitle starts when the speaker changes, and a quick exchange shares one subtitle as `- ` lines, the way professional subtitles show dialogue. Measured on hand-labelled debates and news (VoxConverse, 1–11 speakers): 10.8 % diarization error — the range of far larger systems — checked by CI on every change. It runs on the processor while the GPU already works on the next file; if it ever fails, you still get the subtitle, just without the marks.
+- 🗨️ **Who is speaking?** With `-speakers` a new subtitle starts when the speaking voice changes, and a quick exchange shares one subtitle as `- ` lines, the way professional subtitles show dialogue. It looks only for the *moment* the voice changes (pyannote segmentation 3.0, which judges every second about nine times) — that is what subtitles need, and it is far better at quick replies than telling voices apart across the whole film. Measured on hand-labelled debates and news (VoxConverse, 1–11 speakers) and checked by CI on every change: 74 % of all changes and 59 % of the quick ones found, 73 % of the found ones real; a 2-hour film takes about 2 minutes on the processor, while the GPU already works on the next file. Not perfect — quick replies are the hardest case for any system — and if it ever fails, you still get the subtitle, just without the marks.
 - 🎚️ **Multi-track aware.** A file with several audio tracks (e.g. German + English) lets you pick which ones to subtitle — each becomes its own language-tagged subtitle track in one MKV.
 - 🧩 **Merge mode.** Drop one video together with extra audio and/or subtitle files and it offers to mux them into one `.joined.mkv` (lossless copy). The result is never silent — if you don't add audio, the video keeps its own.
 - 📐 **Subtitles built right.** Word-level timing, two-line wrapping, sensible characters-per-second, minimum/maximum duration and anti-flicker gaps — close to professional (Netflix/BBC) guidelines.
@@ -64,7 +64,7 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 A fresh install used to take the newest of everything — and one day a new PyAV release broke every new installation. Now SuperSubtitler installs one **tested set**, the same for every user, written into the EXE ([`runtime.json`](runtime.json)):
 
 - **Exact versions** of Python (3.12.10), pip, FFmpeg (8.1.2), faster-whisper, CTranslate2, PyAV, every other package and the CUDA libraries — pip installs them offline with `--require-hashes`, so nothing unlisted slips in.
-- **Speech models at an exact revision** (large-v3-turbo, large-v3), and the two small speaker-recognition models (pyannote segmentation 3.0, 3D-Speaker ERes2Net) together with sherpa-onnx — installed only the first time `-speakers` is used (or by `-setup`).
+- **Speech models at an exact revision** (large-v3-turbo, large-v3), and the small pyannote segmentation 3.0 model (6 MB) for `-speakers` — fetched the first time it is used (or by `-setup`).
 - **Every file is checked against its SHA-256** before it is used; a damaged or changed download is refused.
 - **Everything from the own mirror:** Python, pip, every Python package, FFmpeg and the speech models come from this project's [`runtime-v1` release](https://github.com/burnersen/SuperSubtitler/releases/tag/runtime-v1) first and only then from their original source — a renamed or deleted upstream repository cannot break an install. (Files over 2 GB are stored in parts and joined while downloading.)
 - **Own FFmpeg:** a lean build made here from the official, signed FFmpeg 8.1.2 source — only FFmpeg's own code plus zlib, LGPL, 25 MB. SuperSubtitler only reads audio, mixes channels and copies streams into MKV, so it needs no external codec libraries. The exact sources and the build script are in the same release.
@@ -104,7 +104,6 @@ Drag files or folders onto the EXE, or pass them as arguments. Flags and files m
 | `-novad` | Disable the silence filter (transcribe everything, pauses included) |
 | `-lowmem` | Smaller compute type (less video memory, a bit slower) |
 | `-speakers` | Mark speaker changes: a new subtitle per voice, `- ` lines for quick exchanges |
-| `-speakers:N` | The same for exactly N speakers (when you know the cast and the automatic count is off) |
 | `-split` | Export each audio channel as a WAV to find the speech; skip transcription |
 | `-auto` | Never ask: all audio tracks, the detected language, merge = yes |
 | `-force` | Redo files that already have subtitles (overwrites the old results) |
@@ -134,7 +133,7 @@ Drop **one** video together with one or more audio and/or subtitle files, and Su
 
 Two plain-text files are created next to the EXE on first run:
 
-- **`SuperSubtitler_Config.ini`** — models, the silence-filter settings, lead-in, surround handling, all subtitle formatting limits (chars per line, CPS, min/max duration, …) and the speaker recognition (how readily voices count as different, a fixed number of speakers). Invalid values reset the file to its documented defaults.
+- **`SuperSubtitler_Config.ini`** — models, the silence-filter settings, lead-in, surround handling, all subtitle formatting limits (chars per line, CPS, min/max duration, …) and how sure a speaker change must be. Invalid values reset the file to its documented defaults.
 - **`SuperSubtitler_SRTCleaner.txt`** — one term per line to delete from results (ads, junk). A line starting with `=` only matches when the whole subtitle equals it exactly. Nothing is hard-coded; you decide every term.
 
 ---
@@ -227,6 +226,6 @@ SuperSubtitler does **not** bundle these; it downloads or invokes them:
 - **faster-whisper** — speech recognition engine by [SYSTRAN](https://github.com/SYSTRAN/faster-whisper) (MIT), installed via pip on first run. It runs OpenAI's **Whisper** models (MIT).
 - **FFmpeg** — all audio/video processing. SuperSubtitler uses its own lean build of FFmpeg 8.1.2 (LGPL 2.1 or later), compiled by [`.github/scripts/build_ffmpeg.sh`](.github/scripts/build_ffmpeg.sh) from the unmodified, signature-checked [FFmpeg](https://ffmpeg.org) source plus [zlib](https://zlib.net); both source archives are in the `runtime-v1` release next to the build. FFmpeg is a separate work by the FFmpeg project under its own license and is invoked as an external program. This software uses code of FFmpeg licensed under the [LGPLv2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html).
 - **Python** — the official python.org Windows embeddable build, downloaded on first run to host the engine.
-- **sherpa-onnx** — speaker recognition (`-speakers`) by [k2-fsa](https://github.com/k2-fsa/sherpa-onnx) (Apache 2.0), with the [pyannote segmentation 3.0](https://huggingface.co/pyannote/segmentation-3.0) model (MIT) and the [3D-Speaker](https://github.com/modelscope/3D-Speaker) ERes2Net speaker embedding (Apache 2.0) in sherpa-onnx's ONNX conversions.
+- **pyannote segmentation 3.0** — finds the speaker changes (`-speakers`); model by [pyannote](https://huggingface.co/pyannote/segmentation-3.0) (MIT), in the ONNX conversion of [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), run with onnxruntime (MIT).
 
 Python, pip, the Python packages, the Whisper and speaker model files and the FFmpeg build are mirrored in this repository's [`runtime-v1` release](https://github.com/burnersen/SuperSubtitler/releases/tag/runtime-v1). Their licences allow that (PSF, MIT, BSD, Apache 2.0, LGPL with the source alongside; the NVIDIA CUDA libraries under NVIDIA's licence, which allows redistribution with applications); the notices are listed there.

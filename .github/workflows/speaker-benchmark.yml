@@ -1,25 +1,22 @@
-# Measures how well -speakers tells voices apart, on a fixed, checksummed
-# part of VoxConverse (66 minutes of debates and news, 1-11 speakers, labelled
-# by hand). Runs transcribe.py --diarize - the code SuperSubtitler runs - with
-# the pinned models, and fails when the error rate gets worse than the limit
-# below. Linux is enough here: sherpa-onnx computes the same on every system.
+# Measures how well -speakers finds the moments the speaking voice changes,
+# on a fixed, checksummed part of VoxConverse (66 minutes of debates and
+# news, 1-11 speakers, labelled by hand). Runs transcribe.py --diarize - the
+# code SuperSubtitler runs - with the pinned model, and fails when it finds
+# fewer changes, or fewer quick ones, than the limits below. Linux is enough
+# here: onnxruntime computes the same on every system.
 #
-# By hand with "sweep" ticked it compares several speaker-embedding models
-# and thresholds side by side (one job each, in parallel) and prints a
-# ranking - the basis for choosing what runtime.json pins.
+# By hand with "sweep" ticked it compares several thresholds side by side
+# (one job each, in parallel) and prints a ranking - the basis for the
+# shipped speaker_change_threshold.
 name: Speaker benchmark
 
 on:
   workflow_dispatch:
     inputs:
       sweep:
-        description: 'Compare embedding models and thresholds'
+        description: 'Compare thresholds'
         type: boolean
         default: false
-      candidates:
-        description: 'Sweep only: embedding files (space-separated; empty = the list below)'
-        type: string
-        default: ''
       thresholds:
         description: 'Sweep only: thresholds (space-separated; empty = the list below)'
         type: string
@@ -37,20 +34,11 @@ permissions:
   contents: read
 
 env:
-  # The DER of the shipped setup may not rise above this (percent). Measured
-  # for ERes2Net at 0.95: 10.75.
-  MAX_DER: '12.5'
-  # Candidates for the sweep, all from the repository and revision the pinned
-  # embedding comes from.
-  CANDIDATES: >-
-    3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx
-    3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
-    3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
-    wespeaker_en_voxceleb_resnet34_LM.onnx
-    wespeaker_en_voxceleb_CAM++_LM.onnx
-    nemo_en_titanet_small.onnx
-  THRESHOLDS: '0.3 0.4 0.5 0.6 0.7 0.8 0.9'
-  CANDIDATE_URL: https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/0743f301363dec56491a490f6d6cbc9d67f9a3bf
+  # The shipped setup must not do worse than this (percent). Measured for
+  # speaker_change_threshold 0.15: F1 73.4, short recall 59.2.
+  MIN_F1: '71'
+  MIN_SHORT_RECALL: '56'
+  THRESHOLDS: '0.1 0.15 0.2 0.25 0.3 0.4 0.5'
 
 jobs:
   plan:
@@ -62,16 +50,13 @@ jobs:
         shell: python
         env:
           SWEEP: ${{ inputs.sweep && 'yes' || 'no' }}
-          IN_CANDIDATES: ${{ inputs.candidates }}
           IN_THRESHOLDS: ${{ inputs.thresholds }}
         run: |
           import json, os
           if os.environ["SWEEP"] == "yes":
-              cands = (os.environ.get("IN_CANDIDATES") or os.environ["CANDIDATES"]).split()
-              thrs = (os.environ.get("IN_THRESHOLDS") or os.environ["THRESHOLDS"]).split()
-              jobs = [{"embedding": e, "threshold": t} for e in cands for t in thrs]
+              jobs = [{"threshold": t} for t in (os.environ.get("IN_THRESHOLDS") or os.environ["THRESHOLDS"]).split()]
           else:
-              jobs = [{"embedding": "pinned", "threshold": "shipped"}]
+              jobs = [{"threshold": "shipped"}]
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write("matrix=" + json.dumps({"include": jobs}) + "\n")
 
@@ -97,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    name: ${{ matrix.embedding }} @ ${{ matrix.threshold }}
+    name: threshold ${{ matrix.threshold }}
     steps:
       - uses: actions/checkout@v4
 
@@ -107,8 +92,8 @@ jobs:
 
       - name: install
         run: |
-          ver=$(python -c "import json; print([p['version'] for p in json.load(open('runtime.json'))['packages'] if p['name']=='sherpa-onnx'][0])")
-          pip install --quiet "sherpa-onnx==$ver" numpy scipy
+          pins=$(python -c "import json; print(' '.join('%s==%s' % (p['name'], p['version']) for p in json.load(open('runtime.json'))['packages'] if p['name'] in ('onnxruntime', 'numpy')))")
+          pip install --quiet $pins
 
       - uses: actions/cache/restore@v4
         with:
@@ -122,15 +107,10 @@ jobs:
 
       - name: measure
         run: |
-          args=""
-          if [ "${{ matrix.embedding }}" != "pinned" ]; then
-            curl -sSfL -o "bench/${{ matrix.embedding }}" "$CANDIDATE_URL/${{ matrix.embedding }}"
-            args="--embedding bench/${{ matrix.embedding }}"
-          fi
-          if [ "${{ matrix.threshold }}" != "shipped" ]; then
-            args="$args --threshold ${{ matrix.threshold }}"
+          if [ "${{ matrix.threshold }}" = "shipped" ]; then
+            args="--min-f1 $MIN_F1 --min-short-recall $MIN_SHORT_RECALL"
           else
-            args="$args --max-der $MAX_DER"
+            args="--threshold ${{ matrix.threshold }}"
           fi
           python .github/scripts/speaker_bench.py run bench $args --json result.json
 
@@ -154,13 +134,13 @@ jobs:
         run: |
           import glob, json, os
           rows = [r for f in glob.glob("result-*/result.json") for r in json.load(open(f))]
-          rows.sort(key=lambda r: r["der"])
-          out = ["### Speaker recognition ranking (VoxConverse, 66 min, 1-11 speakers; lower DER is better)", "",
-                 "| embedding | threshold | DER % | missed | false | confusion | speakers off by (avg) |",
-                 "|---|---|---|---|---|---|---|"]
+          rows.sort(key=lambda r: -r["f1"])
+          out = ["### Speaker changes ranking (VoxConverse, 66 min, 1-11 speakers; higher is better)", "",
+                 "| threshold | F1 | recall | short recall | precision | found / real |",
+                 "|---|---|---|---|---|---|"]
           for r in rows:
-              out.append("| %s | %s | **%s** | %s | %s | %s | %s |" % (r["embedding"], r["threshold"], r["der"],
-                         r["miss"], r["false"], r["confusion"], r["count_off"]))
+              out.append("| %s | **%s** | %s | %s | %s | %s / %s |" % (r["threshold"], r["f1"], r["recall"],
+                         r["short_recall"], r["precision"], r["found"], r["real"]))
           text = "\n".join(out)
           print(text)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
