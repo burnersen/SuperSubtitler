@@ -285,6 +285,8 @@ a.link:hover { text-decoration: underline; }
           </label>
           <label class="opt"><input type="checkbox" id="opt-translate" />
             <span>Translate to English<small>Whisper can only translate into English. Uses the large model.</small></span></label>
+          <label class="opt"><input type="checkbox" id="opt-speakers" />
+            <span>Mark speaker changes<small>A new subtitle when the voice changes; quick exchanges share one as “- ” lines. Takes a little longer (runs on the processor).</small></span></label>
           <hr class="sep" />
           <label class="opt"><input type="checkbox" id="opt-srtonly" />
             <span>Subtitle file only<small>Write just the .srt, no MKV copy of the video.</small></span></label>
@@ -696,10 +698,11 @@ function itemHtml(it, page) {
   if (page === "merge") meta += '<span class="lang">' + L.escapeHtml(it.kind) + "</span>";
   if (r) {
     (r.langs || []).filter(Boolean).forEach((l) => { meta += '<span class="lang" title="' + L.escapeHtml(L.languageName(l)) + '">' + L.escapeHtml(l) + "</span>"; });
+    (r.speakers || []).filter(Boolean).forEach((s) => { meta += '<span class="lang" title="' + L.escapeHtml(r.speakerNote || "Voices told apart in this track") + '">' + L.escapeHtml(s) + "</span>"; });
     if (status === "working" || status === "analysing") {
       let s = L.stageText(r.stage);
       if (r.tracks > 1 && r.track) s += " · track " + r.track + "/" + r.tracks;
-      if (r.stage === "transcribe") s += " · " + Math.floor(r.pct * 100) + "%";
+      if (r.stage === "transcribe" || r.stage === "speakers") s += " · " + Math.floor(r.pct * 100) + "%";
       if (r.eta > 0) s += " · " + L.formatDuration(r.eta) + " left";
       meta += "<span>" + L.escapeHtml(s) + "</span>";
     }
@@ -808,7 +811,7 @@ function fillLanguages() {
   sel.innerHTML = html;
 }
 
-const optionIds = ["opt-translate", "opt-srtonly", "opt-lean", "opt-vad", "opt-lowmem", "opt-force", "opt-auto"];
+const optionIds = ["opt-translate", "opt-speakers", "opt-srtonly", "opt-lean", "opt-vad", "opt-lowmem", "opt-force", "opt-auto"];
 let outDir = "";
 
 function saveOptions() {
@@ -856,6 +859,7 @@ function readOptions() {
   return {
     language: lang,
     translate: $("opt-translate").checked,
+    speakers: $("opt-speakers").checked,
     srtOnly: $("opt-srtonly").checked,
     lean: $("opt-lean").checked && !$("opt-srtonly").checked,
     noVad: !$("opt-vad").checked,

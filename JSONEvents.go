@@ -29,9 +29,11 @@ package main
 //	setup     first-run installation steps with download progress
 //	skip      an input that is not processed (already subtitled, own output)
 //	file      a queued file (index is 1-based and stays the file's id)
-//	stage     what a file/track is doing now (probe|detect|extract|transcribe|mux)
+//	stage     what a file/track is doing now (probe|detect|extract|transcribe|speakers|mux)
 //	lang      the resolved language plan of a track
-//	progress  transcription progress of a track (0..1, with ETA)
+//	progress  progress of a track's transcription, or of its speaker
+//	          recognition when "stage" is "speakers" (0..1, with ETA)
+//	speakers  how many speakers a track's speaker recognition found (-speakers)
 //	question  the tool waits for one stdin line
 //	result    a file is finished (success|failed)
 //	error     a fatal error that ends the run (setup failed, no tools, …)
@@ -117,6 +119,7 @@ type eventRun struct {
 	Files     int    `json:"files"`
 	Translate bool   `json:"translate,omitempty"`
 	Auto      bool   `json:"auto,omitempty"`
+	Speakers  bool   `json:"speakers,omitempty"`
 }
 
 type eventSetup struct {
@@ -162,7 +165,7 @@ type eventStage struct {
 	Ev    string `json:"ev"` // "stage"
 	Index int    `json:"index"`
 	Track int    `json:"track,omitempty"` // 1-based position in the file's selection
-	Stage string `json:"stage"`           // probe | detect | extract | transcribe | mux
+	Stage string `json:"stage"`           // probe | detect | extract | transcribe | speakers | mux
 }
 
 type eventLang struct {
@@ -184,6 +187,17 @@ type eventProgress struct {
 	Tracks int     `json:"tracks,omitempty"`
 	Pct    float64 `json:"pct"` // 0..1 of this track
 	ETASec float64 `json:"eta_sec,omitempty"`
+	Stage  string  `json:"stage,omitempty"` // "speakers"; empty = transcription
+}
+
+// eventSpeakers reports the outcome of a track's speaker recognition. Count 0
+// with a Message means it failed and the subtitle has no speaker marks.
+type eventSpeakers struct {
+	Ev      string `json:"ev"` // "speakers"
+	Index   int    `json:"index"`
+	Track   int    `json:"track,omitempty"`
+	Count   int    `json:"count"`
+	Message string `json:"message,omitempty"`
 }
 
 type eventResult struct {
@@ -251,6 +265,7 @@ func emitRun(mode string, files int, cfg *AppConfig) {
 	if cfg != nil {
 		ev.Translate = cfg.translate
 		ev.Auto = cfg.auto
+		ev.Speakers = cfg.speakers
 	}
 	emitEvent(ev)
 }

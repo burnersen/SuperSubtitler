@@ -216,6 +216,26 @@
       "size": 154003
     },
     {
+      "name": "sherpa-onnx",
+      "version": "2.0.1",
+      "file": "sherpa_onnx-2.0.1-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/61/31/1cac1c087f82f26cb57c76ebf62457771a49e3707e8af3395cd9fa6ee8ce/sherpa_onnx-2.0.1-cp312-cp312-win_amd64.whl",
+      "sha256": "9f25448a1af23a013064264b9e2241e0c5d0e1941aeb82dafa969520c694efb9",
+      "cuda": false,
+      "size": 2178304,
+      "group": "speakers"
+    },
+    {
+      "name": "sherpa-onnx-core",
+      "version": "2.0.1",
+      "file": "sherpa_onnx_core-2.0.1-py3-none-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/68/ea/8f02cc34c19d956697dda2f2c470c14cd6b7af77f3ae855c514a86039b68/sherpa_onnx_core-2.0.1-py3-none-win_amd64.whl",
+      "sha256": "08890e9ea23ed2f59f81d5840c63b6b5cc8674d0f6e48d9069126a848aa0e022",
+      "cuda": false,
+      "size": 16663244,
+      "group": "speakers"
+    },
+    {
       "name": "tokenizers",
       "version": "0.23.3",
       "file": "tokenizers-0.23.3-cp310-abi3-win_amd64.whl",
@@ -373,6 +393,37 @@
       ],
       "mirror": true,
       "license": "MIT"
+    },
+    "speaker-segmentation": {
+      "repo": "csukuangfj/sherpa-onnx-pyannote-segmentation-3-0",
+      "revision": "9403a6902bb58e3d5ae8c7e77c3422de279db2e0",
+      "files": [
+        {
+          "name": "model.onnx",
+          "size": 5992913,
+          "sha256": "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079"
+        },
+        {
+          "name": "LICENSE",
+          "size": 1061,
+          "sha256": "14d7016ad68e7394d6e6b78d96cc2ae431c905287b89674cfdf021e79e62b8ba"
+        }
+      ],
+      "mirror": true,
+      "license": "MIT (pyannote segmentation-3.0, CNRS)"
+    },
+    "speaker-embedding": {
+      "repo": "csukuangfj/speaker-embedding-models",
+      "revision": "0743f301363dec56491a490f6d6cbc9d67f9a3bf",
+      "files": [
+        {
+          "name": "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+          "size": 29596978,
+          "sha256": "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b"
+        }
+      ],
+      "mirror": true,
+      "license": "Apache-2.0 (3D-Speaker CAM++)"
     }
   },
   "packages_mirror": true

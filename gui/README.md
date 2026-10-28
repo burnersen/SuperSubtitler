@@ -34,6 +34,10 @@ Every decision about a file (language, timing, layout) stays in the CLI.
   when the batch is done.
 - 🧩 **Merge page** — one video plus audio/subtitle files → `.joined.mkv`,
   lossless.
+- 🗨️ **Mark speaker changes** — tick it on the Subtitle page (`-speakers`): a
+  new subtitle starts when the voice changes, quick exchanges share one as
+  `- ` lines. Each file shows how many speakers were told apart; how readily
+  voices count as different, or a fixed number, is on the Settings page.
 - 🔊 **Split page** — the voice gets lost? Every channel of an audio track
   becomes its own WAV (`Movie.ch02.wav` …) to listen to; then pick that channel
   under **Audio channel** on the Subtitle page (`-split` / `-channel:N`).

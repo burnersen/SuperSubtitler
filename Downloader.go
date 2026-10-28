@@ -380,52 +380,98 @@ func installEngine(ctx context.Context, pyExe string, pinned bool) error {
 		}
 		return nil
 	}
-	// Pinned: every wheel is fetched by SuperSubtitler itself — mirror first,
-	// PyPI second, each checked against its SHA-256 — into a temporary folder,
-	// and pip installs only from there (--no-index): it never asks PyPI on its
-	// own, and --require-hashes still refuses anything not in the list.
+	if err := installPinnedWheels(ctx, pyExe, spinner, "engine", "Installing whisper engine (tested set)", pins.packagesFor(false)); err != nil {
+		return fmt.Errorf("Downloader.go: installEngine (pinned packages): %w", err)
+	}
+	if appSettings.installCUDA {
+		if err := installPinnedWheels(ctx, pyExe, spinner, "cuda", "Installing CUDA libraries (tested set)", pins.packagesFor(true)); err != nil {
+			return fmt.Errorf("Downloader.go: installEngine (pinned CUDA packages): %w", err)
+		}
+	}
+	return nil
+}
+
+// installPinnedWheels installs exactly pkgs. Every wheel is fetched by
+// SuperSubtitler itself — mirror first, PyPI second, each checked against its
+// SHA-256 — into a temporary folder, and pip installs only from there
+// (--no-index): it never asks PyPI on its own, and --require-hashes still
+// refuses anything not in the list.
+func installPinnedWheels(ctx context.Context, pyExe string, spinner *pterm.SpinnerPrinter, step, label string, pkgs []pinnedPackage) error {
 	wheels, err := os.MkdirTemp("", "ss-wheels-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(wheels)
-	install := func(step, label string, cuda bool) error {
-		pkgs := pins.packagesFor(cuda)
-		var total int64
-		for _, p := range pkgs {
-			total += p.Size
-		}
-		currentSpinner.Store(spinner)
-		defer currentSpinner.Store(nil)
-		emitSetup(step, "start", fmt.Sprintf("%s — downloading %d packages (%.0f MB)", label, len(pkgs), float64(total)/bytesPerMB), 0, float64(total)/bytesPerMB, 0)
-		for i, p := range pkgs {
-			plabel := fmt.Sprintf("%s — package %d/%d: %s %s", label, i+1, len(pkgs), p.Name, p.Version)
-			if err := downloadPinned(ctx, step, plabel, filepath.Join(wheels, p.File), p.Size, p.SHA256,
-				pins.sourcesFor(p.File, p.URL, p.Size, pins.PackagesMirror)); err != nil {
-				return err
-			}
-		}
-		req, err := os.CreateTemp("", "ss-requirements-*.txt")
-		if err != nil {
+	var total int64
+	for _, p := range pkgs {
+		total += p.Size
+	}
+	currentSpinner.Store(spinner)
+	defer currentSpinner.Store(nil)
+	emitSetup(step, "start", fmt.Sprintf("%s — downloading %d packages (%.0f MB)", label, len(pkgs), float64(total)/bytesPerMB), 0, float64(total)/bytesPerMB, 0)
+	for i, p := range pkgs {
+		plabel := fmt.Sprintf("%s — package %d/%d: %s %s", label, i+1, len(pkgs), p.Name, p.Version)
+		if err := downloadPinned(ctx, step, plabel, filepath.Join(wheels, p.File), p.Size, p.SHA256,
+			pins.sourcesFor(p.File, p.URL, p.Size, pins.PackagesMirror)); err != nil {
 			return err
 		}
-		defer os.Remove(req.Name())
-		if _, err := req.WriteString(pins.requirementsText(cuda)); err != nil {
-			req.Close()
-			return err
-		}
+	}
+	req, err := os.CreateTemp("", "ss-requirements-*.txt")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(req.Name())
+	if _, err := req.WriteString(requirementsFor(pkgs)); err != nil {
 		req.Close()
-		return runPip(ctx, pyExe, spinner, step, label, "--no-index", "--find-links", wheels,
-			"--require-hashes", "--only-binary=:all:", "-r", req.Name())
+		return err
 	}
-	if err := install("engine", "Installing whisper engine (tested set)", false); err != nil {
-		return fmt.Errorf("Downloader.go: installEngine (pinned packages): %w", err)
+	req.Close()
+	return runPip(ctx, pyExe, spinner, step, label, "--no-index", "--find-links", wheels,
+		"--require-hashes", "--only-binary=:all:", "-r", req.Name())
+}
+
+// speakerPackageSpec is what an expert's own (unpinned) engine gets for
+// speaker marking: the newest version, like the engine itself.
+const speakerPackageSpec = "sherpa-onnx"
+
+// ensureSpeakerEngine adds the speaker-marking package (sherpa-onnx, about
+// 19 MB) to the installed Python the first time it is needed. It has its own
+// marker, so the engine itself is never reinstalled for it.
+func ensureSpeakerEngine(ctx context.Context, pythonDir string) error {
+	pyExe := filepath.Join(pythonDir, "python.exe")
+	marker := filepath.Join(pythonDir, ".ss_speakers")
+	pinned := usesPinnedEngine(appSettings)
+	want := speakerPackageSpec
+	if pinned {
+		want = pins.groupLockID("speakers")
 	}
-	if appSettings.installCUDA {
-		if err := install("cuda", "Installing CUDA libraries (tested set)", true); err != nil {
-			return fmt.Errorf("Downloader.go: installEngine (pinned CUDA packages): %w", err)
+	if markerMatches(marker, want) {
+		return nil
+	}
+	label := "Installing speaker recognition"
+	spinner, _ := pterm.DefaultSpinner.WithText(label + " (one-time)...").Start()
+	stop := func() {
+		if spinner != nil {
+			_ = spinner.Stop()
+			spinner = nil
 		}
 	}
+	defer stop()
+	var err error
+	if pinned {
+		err = installPinnedWheels(ctx, pyExe, spinner, "speakers", label+" (tested set)", pins.groupPackages("speakers"))
+	} else {
+		err = runPip(ctx, pyExe, spinner, "speakers", label, "--upgrade", speakerPackageSpec)
+	}
+	if err != nil {
+		return fmt.Errorf("Downloader.go: ensureSpeakerEngine: %w", err)
+	}
+	if err := os.WriteFile(marker, []byte(want), 0644); err != nil {
+		return fmt.Errorf("Downloader.go: ensureSpeakerEngine (marker): %w", err)
+	}
+	stop()
+	pOK.Println("Speaker recognition ready.")
+	emitSetup("speakers", "done", "Speaker recognition ready", 0, 0, 0)
 	return nil
 }
 
@@ -566,7 +612,11 @@ func ensurePinnedModel(ctx context.Context, name string, pm pinnedModel) (string
 	for _, f := range pm.Files {
 		total += f.Size
 	}
-	label := fmt.Sprintf("Downloading speech model %s (%.1f GB, one-time)", name, float64(total)/1e9)
+	size := fmt.Sprintf("%.1f GB", float64(total)/1e9)
+	if total < 1e9 {
+		size = fmt.Sprintf("%.0f MB", float64(total)/bytesPerMB)
+	}
+	label := fmt.Sprintf("Downloading model %s (%s, one-time)", name, size)
 	spinner, _ := pterm.DefaultSpinner.WithText(label + "...").Start()
 	currentSpinner.Store(spinner)
 	defer currentSpinner.Store(nil)
@@ -587,7 +637,7 @@ func ensurePinnedModel(ctx context.Context, name string, pm pinnedModel) (string
 			pInfo.Printf("Speech model %s: %s taken from the existing model cache (verified).\n", name, f.Name)
 			continue
 		}
-		flabel := "Speech model " + name + ": " + f.Name
+		flabel := "Model " + name + ": " + f.Name
 		sources := pins.sourcesFor(modelAsset(name, f.Name), hfURL(pm, f.Name), f.Size, pm.Mirror)
 		if err := downloadPinned(ctx, "model", flabel, dest, f.Size, f.SHA256, sources); err != nil {
 			return "", err
@@ -600,8 +650,8 @@ func ensurePinnedModel(ctx context.Context, name string, pm pinnedModel) (string
 		_ = spinner.Stop()
 		spinner = nil
 	}
-	pOK.Printf("Speech model %s ready (revision %s, verified).\n", name, pm.Revision[:12])
-	emitSetup("model", "done", "Speech model "+name+" ready", float64(total)/bytesPerMB, float64(total)/bytesPerMB, 0)
+	pOK.Printf("Model %s ready (revision %s, verified).\n", name, pm.Revision[:12])
+	emitSetup("model", "done", "Model "+name+" ready", float64(total)/bytesPerMB, float64(total)/bytesPerMB, 0)
 	return dir, nil
 }
 

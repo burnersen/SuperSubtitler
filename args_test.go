@@ -264,3 +264,44 @@ func TestNewSettingLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestSpeakerFlagsAndSettings(t *testing.T) {
+	if cfg := parseArgs([]string{"-speakers"}); !cfg.speakers || cfg.speakerCount != 0 {
+		t.Errorf("-speakers: %+v", cfg)
+	}
+	if cfg := parseArgs([]string{"-Speakers:3"}); !cfg.speakers || cfg.speakerCount != 3 {
+		t.Errorf("-speakers:3: %+v", cfg)
+	}
+	if cfg := parseArgs([]string{"-speakers:x"}); !cfg.speakers || cfg.speakerCount != 0 {
+		t.Errorf("-speakers:x must fall back to automatic: %+v", cfg)
+	}
+	for _, bad := range []string{"speaker_threshold=0.1", "speaker_threshold=0.95", "speaker_count=-1", "speaker_count=21"} {
+		if settingsProblem(parseSettings(bad)) == "" {
+			t.Errorf("%s must be refused", bad)
+		}
+	}
+	s := appSettings
+	defer func() { appSettings = s }()
+	appSettings.speakerCount = 4
+	if speakerCountFor(&AppConfig{}) != 4 || speakerCountFor(&AppConfig{speakerCount: 2}) != 2 {
+		t.Error("-speakers:N must win over speaker_count, which applies otherwise")
+	}
+}
+
+func TestModelsNeededWithSpeakers(t *testing.T) {
+	s := appSettings
+	defer func() { appSettings = s }()
+	appSettings.detectModel, appSettings.modelTranscribe = "turbo", "turbo"
+	want := []string{"turbo", speakerSegmentationModel, speakerEmbeddingModel}
+	if got := modelsNeeded(&AppConfig{speakers: true}); !reflect.DeepEqual(got, want) {
+		t.Errorf("-speakers = %q", got)
+	}
+	if got := modelsNeeded(&AppConfig{setup: true}); !reflect.DeepEqual(got, want) {
+		t.Errorf("-setup must install the speaker models too, got %q", got)
+	}
+	for _, m := range want[1:] {
+		if _, ok := pins.Models[m]; !ok {
+			t.Errorf("%s is not pinned", m)
+		}
+	}
+}
