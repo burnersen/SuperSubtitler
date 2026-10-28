@@ -156,13 +156,45 @@ func loadOrCreateAppConfig() {
 		writeDefaultConfig(path)
 		return
 	}
-	s := parseSettings(string(data))
+	text, migrated := migrateSettings(string(data))
+	if migrated {
+		if err := os.WriteFile(path, []byte(text), 0644); err != nil {
+			pWarn.Printf("Could not update %s: %v\n", configFileName, err)
+		} else {
+			pInfo.Println("Speaker recognition: " + configFileName + " moved to the new tested default (speaker_threshold=" +
+				strconv.FormatFloat(defaultSettings().speakerThreshold, 'f', 2, 64) + ").")
+		}
+	}
+	s := parseSettings(text)
 	if !validateSettings(s) {
 		pWarn.Println("Invalid value in " + configFileName + " — file reset to defaults.")
 		writeDefaultConfig(path)
 		return
 	}
 	appSettings = s
+}
+
+// oldSpeakerThreshold is the default 0.3.0 wrote; it belonged to its speaker
+// model and splits voices far too readily with the measured one (see the
+// speaker benchmark), so a file still holding it gets the current default.
+const oldSpeakerThreshold = "speaker_threshold=0.50"
+
+// migrateSettings updates defaults of older versions that are known to be
+// wrong now. It reports whether text changed.
+func migrateSettings(text string) (string, bool) {
+	current := "speaker_threshold=" + strconv.FormatFloat(defaultSettings().speakerThreshold, 'f', 2, 64)
+	if current == oldSpeakerThreshold {
+		return text, false
+	}
+	lines := strings.Split(text, "\n")
+	changed := false
+	for i, l := range lines {
+		if strings.TrimSpace(l) == oldSpeakerThreshold {
+			lines[i] = strings.Replace(l, oldSpeakerThreshold, current, 1)
+			changed = true
+		}
+	}
+	return strings.Join(lines, "\n"), changed
 }
 
 func applySetting(s *AppSettings, key, val string) {

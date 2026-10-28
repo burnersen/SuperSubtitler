@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -303,5 +304,16 @@ func TestModelsNeededWithSpeakers(t *testing.T) {
 		if _, ok := pins.Models[m]; !ok {
 			t.Errorf("%s is not pinned", m)
 		}
+	}
+}
+
+func TestMigrateOldSpeakerThreshold(t *testing.T) {
+	want := "speaker_threshold=" + strconv.FormatFloat(defaultSettings().speakerThreshold, 'f', 2, 64)
+	out, changed := migrateSettings("[speakers]\r\nspeaker_threshold=0.50\r\nspeaker_count=0\r\n")
+	if !changed || !strings.Contains(out, want+"\r\n") || !strings.Contains(out, "speaker_count=0") {
+		t.Errorf("0.3.0's default must move to the current one:\n%q", out)
+	}
+	if _, changed := migrateSettings("speaker_threshold=0.65\n"); changed {
+		t.Error("a value the user chose must stay")
 	}
 }
