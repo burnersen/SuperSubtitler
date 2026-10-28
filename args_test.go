@@ -276,7 +276,7 @@ func TestSpeakerFlagsAndSettings(t *testing.T) {
 	if cfg := parseArgs([]string{"-speakers:x"}); !cfg.speakers || cfg.speakerCount != 0 {
 		t.Errorf("-speakers:x must fall back to automatic: %+v", cfg)
 	}
-	for _, bad := range []string{"speaker_threshold=0.1", "speaker_threshold=0.95", "speaker_count=-1", "speaker_count=21"} {
+	for _, bad := range []string{"speaker_threshold=0.2", "speaker_threshold=1.6", "speaker_count=-1", "speaker_count=21"} {
 		if settingsProblem(parseSettings(bad)) == "" {
 			t.Errorf("%s must be refused", bad)
 		}
