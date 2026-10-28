@@ -23,7 +23,8 @@ type RunOptions struct {
 	LowMem    bool   `json:"lowMem"`
 	Auto      bool   `json:"auto"`
 	Force     bool   `json:"force"`
-	OutDir    string `json:"outDir"` // "" = next to the source
+	Speakers  bool   `json:"speakers"` // mark speaker changes (-speakers)
+	OutDir    string `json:"outDir"`   // "" = next to the source
 	// Channel is the physical channel to isolate ("0", "2", …), "" = the
 	// automatic voice-focused downmix. A string on purpose: an int would make
 	// a missing value mean "channel 0" instead of "automatic".
@@ -69,7 +70,7 @@ func SubtitleArgs(o RunOptions) ([]string, error) {
 		on   bool
 		flag string
 	}{
-		{o.Translate, "-translate"}, {o.SrtOnly, "-srtonly"}, {o.Lean, "-lean"},
+		{o.Translate, "-translate"}, {o.Speakers, "-speakers"}, {o.SrtOnly, "-srtonly"}, {o.Lean, "-lean"},
 		{o.NoVad, "-novad"}, {o.LowMem, "-lowmem"}, {o.Auto, "-auto"}, {o.Force, "-force"},
 	} {
 		if f.on {

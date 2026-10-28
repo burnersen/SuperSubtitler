@@ -64,6 +64,12 @@ OPTIONS
                    everything, including pauses).
   -lowmem          Use a smaller compute type (less video
                    memory, a bit slower).
+  -speakers        Mark speaker changes: a new subtitle starts
+                   when the voice changes, and a quick exchange
+                   shares one subtitle as "- " lines. Installs
+                   a small extra (about 55 MB) the first time.
+  -speakers:N      The same for exactly N speakers - when you
+                   know how many people speak.
   -split           Export every audio channel as a separate
                    WAV so you can listen and find where the
                    speech is; skips transcription.

@@ -168,11 +168,20 @@
     detect: "Detecting the language",
     extract: "Extracting audio",
     transcribe: "Transcribing",
+    speakers: "Telling speakers apart",
     mux: "Building the MKV"
   };
 
   function stageText(stage) {
     return STAGES[stage] || stage || "";
+  }
+
+  // Share of a row's bar for transcribing when speakers are marked too (the
+  // speaker recognition is the much quicker rest).
+  const TRANSCRIBE_SHARE = 0.85;
+
+  function speakersText(n) {
+    return n === 1 ? "1 speaker" : (n || 0) + " speakers";
   }
 
   // createRun starts the bookkeeping for one window run. rows are the queue
@@ -187,6 +196,7 @@
       indexToRow: {},
       rows: {},          // id → state
       order: rows.map((r) => r.id),
+      speakers: false,   // the run marks speaker changes (-speakers)
       setup: null,
       question: null,
       summary: null,
@@ -199,7 +209,7 @@
     if (!model.rows[id]) {
       model.rows[id] = {
         status: "waiting", stage: "", pct: 0, eta: 0, track: 0, tracks: 1,
-        langs: [], outputs: [], message: ""
+        langs: [], speakers: [], speakerNote: "", outputs: [], message: ""
       };
     }
     return model.rows[id];
@@ -214,6 +224,7 @@
       case "run":
         model.indexToRow = {}; // numbering restarts with every process
         model.batchFiles = ev.files || 0;
+        model.speakers = !!ev.speakers;
         return null;
       case "setup":
         model.setup = ev.step === "ready" ? null : {
@@ -252,7 +263,7 @@
         if (r.status === "failed" || r.status === "done") return id;
         r.stage = ev.stage;
         if (ev.track) r.track = ev.track;
-        if (ev.stage === "transcribe" || ev.stage === "mux" || ev.stage === "extract") r.status = "working";
+        if (ev.stage === "transcribe" || ev.stage === "speakers" || ev.stage === "mux" || ev.stage === "extract") r.status = "working";
         return id;
       }
       case "lang": {
@@ -271,11 +282,24 @@
         const tracks = Math.max(1, ev.tracks || r.tracks);
         const track = Math.min(Math.max(1, ev.track || 1), tracks);
         const pct = Math.min(Math.max(Number(ev.pct) || 0, 0), 1);
+        const speakers = ev.stage === "speakers";
+        let frac = (track - 1 + pct) / tracks;
+        // With speaker marking every track is transcribed first, then its
+        // voices are told apart: the bar gives each phase its share.
+        if (model.speakers) frac = speakers ? TRANSCRIBE_SHARE + (1 - TRANSCRIBE_SHARE) * frac : TRANSCRIBE_SHARE * frac;
         // Never let a bar run backwards: a late duplicate line must not undo.
-        r.pct = Math.max(r.pct, (track - 1 + pct) / tracks);
+        r.pct = Math.max(r.pct, frac);
         r.eta = ev.eta_sec || 0;
         r.status = "working";
-        r.stage = "transcribe";
+        r.stage = speakers ? "speakers" : "transcribe";
+        return id;
+      }
+      case "speakers": {
+        const id = rowOf(ev.index);
+        if (id === undefined) return null;
+        const r = rowState(model, id);
+        r.speakers[(ev.track || 1) - 1] = ev.message ? "no speaker marks" : speakersText(ev.count);
+        if (ev.message) r.speakerNote = "speaker recognition failed: " + ev.message;
         return id;
       }
       case "question":
@@ -347,7 +371,8 @@
     pip: "pip",
     engine: "Whisper engine",
     cuda: "CUDA libraries",
-    model: "Speech model"
+    model: "Speech model",
+    speakers: "Speaker recognition"
   };
 
   // setupText renders the setup panel line; pct is null when the size is

@@ -13,27 +13,34 @@ import (
 )
 
 type cue struct {
-	start float64
-	end   float64
-	lines []string
+	start   float64
+	end     float64
+	lines   []string
+	speaker int // noSpeaker without speaker marking
 }
 
 // wordTS is a lead-in-corrected word with absolute timing.
 type wordTS struct {
-	start float64
-	end   float64
-	text  string
+	start   float64
+	end     float64
+	text    string
+	speaker int // noSpeaker without speaker marking
 }
 
 // buildSRT turns engine output into a finished SRT string. leadinSec (the
 // artificial run-up silence) is removed from every timestamp so the result is
-// frame-accurate against the original.
-func buildSRT(wj *whisperJSON, leadinSec float64, s AppSettings) string {
+// frame-accurate against the original. turns (speaker recognition, in the
+// WAV's timeline like the words) may be nil: then no speaker is marked.
+func buildSRT(wj *whisperJSON, leadinSec float64, s AppSettings, turns []speakerTurn) string {
 	words := collectWords(wj, leadinSec)
 	if len(words) == 0 {
 		return ""
 	}
+	if len(turns) > 0 {
+		assignSpeakers(words, shiftTurns(turns, leadinSec))
+	}
 	cues := groupCues(words, s)
+	cues = mergeDialogue(cues, s)
 	enforceTiming(cues, s)
 	return renderSRT(cues)
 }
@@ -46,7 +53,7 @@ func collectWords(wj *whisperJSON, leadinSec float64) []wordTS {
 			if t == "" {
 				continue
 			}
-			out = append(out, shiftWord(wordTS{seg.Start, seg.End, t}, leadinSec))
+			out = append(out, shiftWord(wordTS{seg.Start, seg.End, t, noSpeaker}, leadinSec))
 			continue
 		}
 		for _, w := range seg.Words {
@@ -54,7 +61,7 @@ func collectWords(wj *whisperJSON, leadinSec float64) []wordTS {
 			if t == "" {
 				continue
 			}
-			out = append(out, shiftWord(wordTS{w.Start, w.End, t}, leadinSec))
+			out = append(out, shiftWord(wordTS{w.Start, w.End, t, noSpeaker}, leadinSec))
 		}
 	}
 	// Drop anything that ended before t=0 after the shift; clamp the rest.
@@ -77,8 +84,9 @@ func shiftWord(w wordTS, leadinSec float64) wordTS {
 	return w
 }
 
-// groupCues greedily packs words into cues, breaking on long pauses or when the
-// next word would exceed the character or duration budget.
+// groupCues greedily packs words into cues, breaking on long pauses, when the
+// voice changes, or when the next word would exceed the character or duration
+// budget.
 func groupCues(words []wordTS, s AppSettings) []cue {
 	maxChars := s.subMaxCharsPerLine * s.subMaxLines
 	maxDur := float64(s.subMaxDurMs) / 1000.0
@@ -87,6 +95,7 @@ func groupCues(words []wordTS, s AppSettings) []cue {
 	var cues []cue
 	var curWords []string
 	var curStart, curEnd float64
+	curSpeaker := noSpeaker
 
 	flush := func() {
 		if len(curWords) == 0 {
@@ -94,9 +103,10 @@ func groupCues(words []wordTS, s AppSettings) []cue {
 		}
 		text := strings.Join(curWords, " ")
 		cues = append(cues, cue{
-			start: curStart,
-			end:   curEnd,
-			lines: wrapText(text, s.subMaxCharsPerLine, s.subMaxLines),
+			start:   curStart,
+			end:     curEnd,
+			lines:   wrapText(text, s.subMaxCharsPerLine, s.subMaxLines),
+			speaker: curSpeaker,
 		})
 		curWords = nil
 	}
@@ -104,15 +114,15 @@ func groupCues(words []wordTS, s AppSettings) []cue {
 	for _, w := range words {
 		if len(curWords) == 0 {
 			curWords = []string{w.text}
-			curStart, curEnd = w.start, w.end
+			curStart, curEnd, curSpeaker = w.start, w.end, w.speaker
 			continue
 		}
 		gap := w.start - curEnd
 		tentative := len(strings.Join(curWords, " ")) + 1 + len(w.text)
-		if gap > gapSplit || tentative > maxChars || (w.end-curStart) > maxDur {
+		if gap > gapSplit || tentative > maxChars || (w.end-curStart) > maxDur || w.speaker != curSpeaker {
 			flush()
 			curWords = []string{w.text}
-			curStart, curEnd = w.start, w.end
+			curStart, curEnd, curSpeaker = w.start, w.end, w.speaker
 			continue
 		}
 		curWords = append(curWords, w.text)
@@ -120,6 +130,55 @@ func groupCues(words []wordTS, s AppSettings) []cue {
 	}
 	flush()
 	return cues
+}
+
+// dialoguePrefix starts each line of a subtitle shared by two speakers.
+const dialoguePrefix = "- "
+
+// mergeDialogue puts two short exchanges of different speakers into one
+// subtitle, one "- " line each — the usual way (Netflix and others) to show a
+// quick back-and-forth that would otherwise flash by as two tiny subtitles.
+// Only when each is everything that voice says at that point (not the tail or
+// start of a longer speech, which would read as a cut-off sentence), both fit
+// on one line each (dash included), the subtitle may have two lines, the pause
+// between them is no longer than the one that starts a new subtitle anyway,
+// and together they stay within the longest display time.
+func mergeDialogue(cues []cue, s AppSettings) []cue {
+	if s.subMaxLines < 2 {
+		return cues
+	}
+	maxDur := float64(s.subMaxDurMs) / 1000.0
+	gapSplit := float64(s.subGapSplitMs) / 1000.0
+	fits := func(c cue) bool {
+		return c.speaker != noSpeaker && len(c.lines) == 1 &&
+			len([]rune(dialoguePrefix+c.lines[0])) <= s.subMaxCharsPerLine
+	}
+	// continues: cue j carries on what cue i (right before it) said.
+	continues := func(i, j int) bool {
+		return i >= 0 && j < len(cues) && cues[i].speaker == cues[j].speaker &&
+			cues[j].start-cues[i].end <= gapSplit
+	}
+	var out []cue
+	for i := 0; i < len(cues); i++ {
+		a := cues[i]
+		if i+1 < len(cues) {
+			b := cues[i+1]
+			if fits(a) && fits(b) && a.speaker != b.speaker &&
+				!continues(i-1, i) && !continues(i+1, i+2) &&
+				b.start-a.end <= gapSplit && b.end-a.start <= maxDur {
+				out = append(out, cue{
+					start:   a.start,
+					end:     b.end,
+					lines:   []string{dialoguePrefix + a.lines[0], dialoguePrefix + b.lines[0]},
+					speaker: b.speaker,
+				})
+				i++
+				continue
+			}
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // enforceTiming applies minimum duration, minimum gap (anti-flicker) and a soft

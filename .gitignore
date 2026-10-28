@@ -8,3 +8,6 @@ SuperSubtitler_src.zip
 # GUI build output and the window's remembered size/theme
 gui/build/bin/
 SuperSubtitlerGUI.window
+
+# Python bytecode (from running the driver tests)
+__pycache__/

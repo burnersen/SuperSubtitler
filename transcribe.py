@@ -8,10 +8,17 @@ Invoked by the Go front-end as:
 
     python.exe transcribe.py [--flag value ...] WAV [WAV ...]
     python.exe transcribe.py --prefetch --model_dir DIR MODEL [MODEL ...]
+    python.exe transcribe.py --diarize --segmentation F --embedding F --output F WAV
 
 The second form only downloads the models (one-time setup, so the download
 happens with visible progress instead of inside the first transcription) and
 prints "@MODELPATH <name><TAB><folder>" for each.
+
+The third form tells speakers apart (sherpa-onnx) and writes {"turns": [{start,
+end, speaker}]} in the WAV's timeline. It always runs in a process of its own:
+sherpa-onnx brings its own onnxruntime.dll, and two different onnxruntime
+builds in one process (faster-whisper's silence filter uses the other one) do
+not mix.
 
 It mirrors the flag set centralised in Whisper.go and writes, for every input
 WAV, an "<output_dir>/<basename>.json" file with exactly the shape the Go side
@@ -178,9 +185,90 @@ def prefetch():
         sys.stdout.flush()
 
 
+def read_wav_float(path, rate):
+    """16-bit mono PCM -> float32 in [-1, 1), converted in slices so a long
+    film does not need a second full-size copy in memory."""
+    import wave
+    import numpy as np
+    with wave.open(path, "rb") as w:
+        if w.getnchannels() != 1 or w.getsampwidth() != 2 or w.getframerate() != rate:
+            raise ValueError("%s: need 16-bit mono %d Hz, got %d channel(s), %d bytes, %d Hz"
+                             % (path, rate, w.getnchannels(), w.getsampwidth(), w.getframerate()))
+        n = w.getnframes()
+        out = np.empty(n, dtype=np.float32)
+        pos = 0
+        while pos < n:
+            raw = w.readframes(min(n - pos, 1 << 22))
+            if not raw:
+                break
+            chunk = np.frombuffer(raw, dtype="<i2")
+            out[pos:pos + len(chunk)] = chunk / 32768.0
+            pos += len(chunk)
+        return out[:pos]
+
+
+def renumber(turns):
+    """Speaker numbers as they first appear (0, 1, 2 ...); the clustering
+    hands out arbitrary ones (0, 1, 6, 11)."""
+    order = {}
+    out = []
+    for t in sorted(turns, key=lambda t: (t["start"], t["end"])):
+        sp = order.setdefault(t["speaker"], len(order))
+        out.append({"start": round(t["start"], 3), "end": round(t["end"], 3), "speaker": sp})
+    return out
+
+
+def diarize():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--diarize", action="store_true")
+    p.add_argument("--segmentation", required=True)
+    p.add_argument("--embedding", required=True)
+    p.add_argument("--threshold", type=float, default=0.5)
+    p.add_argument("--num_speakers", type=int, default=0)
+    p.add_argument("--output", required=True)
+    p.add_argument("wav")
+    args = p.parse_args()
+    import sherpa_onnx
+    threads = max(1, min(os.cpu_count() or 1, 8))
+    config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+        segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
+            pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=args.segmentation),
+            num_threads=threads,
+        ),
+        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=args.embedding, num_threads=threads),
+        # num_clusters > 0 fixes the count and ignores the threshold.
+        clustering=sherpa_onnx.FastClusteringConfig(
+            num_clusters=args.num_speakers if args.num_speakers > 0 else -1,
+            threshold=args.threshold,
+        ),
+        min_duration_on=0.3,
+        min_duration_off=0.5,
+    )
+    if not config.validate():
+        raise ValueError("speaker models not usable: %s / %s" % (args.segmentation, args.embedding))
+    sd = sherpa_onnx.OfflineSpeakerDiarization(config)
+    samples = read_wav_float(args.wav, sd.sample_rate)
+
+    def progress(done, total):
+        if total > 0:
+            sys.stdout.write("@PROGRESS %.4f\n" % min(1.0, done / total))
+            sys.stdout.flush()
+        return 0  # 0 = go on
+
+    result = sd.process(samples, callback=progress).sort_by_start_time()
+    turns = renumber([{"start": r.start, "end": r.end, "speaker": r.speaker} for r in result])
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump({"turns": turns}, f)
+    sys.stdout.write("@PROGRESS 1.0000\n")
+    sys.stdout.flush()
+
+
 def main():
     if "--prefetch" in sys.argv[1:]:
         prefetch()
+        return
+    if "--diarize" in sys.argv[1:]:
+        diarize()
         return
     args = parse_args()
     _register_cuda_dlls()

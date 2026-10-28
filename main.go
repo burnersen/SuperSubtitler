@@ -122,6 +122,10 @@ func run() (code int) {
 	for _, f := range cfg.unknownFlags {
 		pWarn.Println("Ignoring unknown flag: " + f)
 	}
+	if cfg.speakerCount < 0 || cfg.speakerCount > maxSpeakers {
+		pWarn.Printf("-speakers:N takes 1..%d — finding the number of speakers automatically instead.\n", maxSpeakers)
+		cfg.speakerCount = 0
+	}
 
 	if err := initJobObject(); err != nil {
 		pWarn.Println("Job object unavailable — orphan-kill guarantee weakened: " + err.Error())
@@ -323,6 +327,8 @@ func printUsage() {
 		{pterm.LightCyan("-lean"), "MKV keeps only video + chosen audio + the subtitle track."},
 		{pterm.LightCyan("-novad"), "Disable the voice-activity (silence) filter."},
 		{pterm.LightCyan("-lowmem"), "Smaller compute type (less VRAM, slightly slower)."},
+		{pterm.LightCyan("-speakers"), "Mark speaker changes: new subtitle per voice, \"- \" lines for quick exchanges."},
+		{pterm.LightCyan("-speakers:N"), "The same, for exactly N speakers (when the automatic count is off)."},
 		{pterm.LightCyan("-split"), "Export each audio channel as a WAV (to find the speech); skip transcription."},
 		{pterm.LightCyan("-auto"), "Never ask: all tracks, detected language, merge = yes."},
 		{pterm.LightCyan("-force"), "Redo files that already have subtitles (overwrites the results)."},
@@ -435,6 +441,11 @@ func initTools(ctx context.Context, cfg *AppConfig, needWhisper bool) error {
 	if err := ensurePython(ctx, pythonDir); err != nil {
 		return err
 	}
+	if cfg.speakers || cfg.setup {
+		if err := ensureSpeakerEngine(ctx, pythonDir); err != nil {
+			return err
+		}
+	}
 	if err := ensureModels(ctx, modelsNeeded(cfg)); err != nil {
 		return err
 	}
@@ -462,6 +473,10 @@ func modelsNeeded(cfg *AppConfig) []string {
 		add(appSettings.modelTranslate)
 	} else {
 		add(appSettings.modelTranscribe)
+	}
+	if cfg.speakers || cfg.setup {
+		add(speakerSegmentationModel)
+		add(speakerEmbeddingModel)
 	}
 	return list
 }
@@ -528,6 +543,11 @@ func parseArgs(argv []string) *AppConfig {
 			cfg.outDir = strings.Trim(a[len("-out:"):], `"`)
 		case low == "-translate" || low == "-en":
 			cfg.translate = true
+		case low == "-speakers":
+			cfg.speakers = true
+		case strings.HasPrefix(low, "-speakers:"):
+			cfg.speakers = true
+			cfg.speakerCount = atoiDefault(a[len("-speakers:"):], 0)
 		case low == "-split" || low == "-diag":
 			cfg.split = true
 		case low == "-srtonly":
@@ -1173,11 +1193,19 @@ func finalizeStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 
 	var subs []subInput
 	var audioOrdinals []int
-	for _, t := range job.tracks {
+	for i, t := range job.tracks {
 		if t.wj == nil {
 			continue // track failed earlier
 		}
-		srt := buildSRT(t.wj, leadinSec, appSettings)
+		var turns []speakerTurn
+		if cfg.speakers {
+			turns = markSpeakers(ctx, cfg, job, i, t)
+			if ctx.Err() != nil {
+				job.fail(ctx.Err())
+				return
+			}
+		}
+		srt := buildSRT(t.wj, leadinSec, appSettings, turns)
 		srt = cleanSRT(srt, activeCleaner)
 		if strings.TrimSpace(srt) == "" {
 			t.err = errors.New("no speech recognized")

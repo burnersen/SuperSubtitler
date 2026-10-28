@@ -91,7 +91,7 @@ jobs:
           $code = $LASTEXITCODE
           Get-Content setup.jsonl | Select-String '"ev":"(error|summary)"'
           if ($code -ne 0) { Write-Host "::error::-setup exited with $code"; exit 1 }
-          Write-Host "--- installed:"; Get-Content .ss_ffmpeg; Get-Content Python\.ss_ready
+          Write-Host "--- installed:"; Get-Content .ss_ffmpeg; Get-Content Python\.ss_ready; Get-Content Python\.ss_speakers
           Get-ChildItem whisper\models\pinned
 
       - name: subtitle a test video
@@ -109,6 +109,33 @@ jobs:
           if (-not (Test-Path test.subbed.mkv)) { Write-Host "::error::no .subbed.mkv"; exit 1 }
           .\SuperSubtitler.exe -json -auto test.mkv > again.jsonl
           if (-not (Select-String -Path again.jsonl -Pattern '"reason":"has_subs"' -Quiet)) { Write-Host "::error::a finished file was not skipped"; exit 1 }
+
+      # Speaker marking (sherpa-onnx, pinned like everything else): a recording
+      # with four voices must be told apart as several, JFK alone as one -
+      # and a single voice must never get "- " dialogue lines.
+      - name: mark speakers
+        working-directory: e2e
+        run: |
+          Invoke-WebRequest https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/0-four-speakers-zh.wav -OutFile four.wav
+          function Speakers($events) {
+            $ev = Get-Content $events | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.ev -eq 'speakers' }
+            if (-not $ev) { Get-Content $events; Write-Host "::error::no speakers event in $events"; exit 1 }
+            if ($ev.message) { Write-Host "::error::speaker recognition failed: $($ev.message)"; exit 1 }
+            return [int]$ev.PSObject.Properties["count"].Value
+          }
+          .\SuperSubtitler.exe -json -auto -speakers four.wav > four.jsonl
+          if ($LASTEXITCODE -ne 0) { Get-Content four.jsonl; Write-Host "::error::run exited with $LASTEXITCODE"; exit 1 }
+          $n = Speakers four.jsonl
+          Get-Content four.*.srt
+          Write-Host "four-speaker recording: $n speakers"
+          if ($n -lt 3) { Write-Host "::error::expected at least 3 speakers, got $n"; exit 1 }
+          .\SuperSubtitler.exe -json -auto -speakers jfk.flac > jfk.jsonl
+          if ($LASTEXITCODE -ne 0) { Get-Content jfk.jsonl; Write-Host "::error::run exited with $LASTEXITCODE"; exit 1 }
+          $n = Speakers jfk.jsonl
+          $srt = Get-Content jfk.en.srt -Raw
+          Write-Host $srt
+          if ($n -ne 1) { Write-Host "::error::JFK alone must be 1 speaker, got $n"; exit 1 }
+          if ($srt -match '(?m)^- ') { Write-Host "::error::a single voice got dialogue dashes"; exit 1 }
 
   gui:
     runs-on: windows-latest

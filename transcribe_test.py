@@ -64,5 +64,29 @@ class PatchPyAVOpen(unittest.TestCase):
         self.assertIs(av.open, first)
 
 
+class Renumber(unittest.TestCase):
+    def test_speakers_are_numbered_by_first_appearance(self):
+        turns = [
+            {"start": 4.4, "end": 6.9, "speaker": 6},
+            {"start": 0.3181, "end": 4.0, "speaker": 11},
+            {"start": 7.0, "end": 9.0, "speaker": 11},
+            {"start": 9.5, "end": 10.0, "speaker": 0},
+        ]
+        self.assertEqual(transcribe.renumber(turns), [
+            {"start": 0.318, "end": 4.0, "speaker": 0},
+            {"start": 4.4, "end": 6.9, "speaker": 1},
+            {"start": 7.0, "end": 9.0, "speaker": 0},
+            {"start": 9.5, "end": 10.0, "speaker": 2},
+        ])
+
+    def test_diarize_mode_never_loads_the_whisper_engine(self):
+        # sherpa-onnx brings its own onnxruntime; faster-whisper's silence
+        # filter uses another one. They must never share a process.
+        import inspect
+        src = inspect.getsource(transcribe.diarize) + inspect.getsource(transcribe.read_wav_float)
+        self.assertNotIn("faster_whisper", src)
+        self.assertNotIn("onnxruntime", src)
+
+
 if __name__ == "__main__":
     unittest.main()

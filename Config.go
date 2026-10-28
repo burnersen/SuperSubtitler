@@ -61,6 +61,10 @@ type AppSettings struct {
 	subMaxDurMs        int
 	subMinGapMs        int
 	subGapSplitMs      int
+
+	// Speaker marking (-speakers)
+	speakerThreshold float64 // clustering threshold: lower = more speakers
+	speakerCount     int     // 0 = find out, else exactly this many
 }
 
 // AppConfig holds per-run flag state. Populated once in main, then passed by
@@ -71,6 +75,8 @@ type AppConfig struct {
 	forcedLang    string // ISO code, "" = auto
 	translate     bool   // -translate: translate everything to English
 	split         bool   // -split: export each audio channel as WAV, skip transcription
+	speakers      bool   // -speakers[:N]: mark speaker changes in the subtitles
+	speakerCount  int    // -speakers:N: exactly N speakers, 0 = from the INI
 	srtOnly       bool   // -srtonly: write only the .srt, no MKV
 	lean          bool   // -lean: drop foreign streams, keep video + chosen audio
 	noVad         bool   // -novad: disable the silence filter
@@ -118,10 +124,15 @@ func defaultSettings() AppSettings {
 		subMaxDurMs:        7000,
 		subMinGapMs:        83,
 		subGapSplitMs:      500,
+		speakerThreshold:   0.5,
+		speakerCount:       0,
 	}
 }
 
 var appSettings = defaultSettings()
+
+// maxSpeakers bounds speaker_count and -speakers:N.
+const maxSpeakers = 20
 
 // defaultEngineSpec means "the tested, pinned package set from runtime.json".
 // Any other engine_spec is installed as written, newest versions, unpinned.
@@ -229,6 +240,10 @@ func applySetting(s *AppSettings, key, val string) {
 		s.subMinGapMs = atoi(s.subMinGapMs)
 	case "sub_gap_split_ms":
 		s.subGapSplitMs = atoi(s.subGapSplitMs)
+	case "speaker_threshold":
+		s.speakerThreshold = atof(s.speakerThreshold)
+	case "speaker_count":
+		s.speakerCount = atoi(s.speakerCount)
 	}
 }
 
@@ -271,6 +286,10 @@ func settingsProblem(s AppSettings) string {
 		return "sub_min_gap_ms must be 0..1000"
 	case s.subGapSplitMs < 100 || s.subGapSplitMs > 5000:
 		return "sub_gap_split_ms must be 100..5000"
+	case s.speakerThreshold < 0.2 || s.speakerThreshold > 0.9:
+		return "speaker_threshold must be 0.2..0.9"
+	case s.speakerCount < 0 || s.speakerCount > maxSpeakers:
+		return fmt.Sprintf("speaker_count must be 0..%d", maxSpeakers)
 	case s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "":
 		return "detect_model, model_transcribe, model_translate and compute_type must not be empty"
 	case s.engineSpec == "" || strings.Count(s.pythonVersion, ".") < 2:
@@ -387,6 +406,15 @@ sub_min_dur_ms=%d
 sub_max_dur_ms=%d
 sub_min_gap_ms=%d
 sub_gap_split_ms=%d
+
+[speakers]
+# Only used with -speakers: a new subtitle starts when the voice changes, and
+# two short lines of different speakers share one subtitle as "- " lines.
+# speaker_threshold: lower = voices are told apart more readily (more
+# speakers), higher = similar voices count as one. speaker_count: 0 finds the
+# number by itself; set it when you know how many people speak.
+speaker_threshold=%.2f
+speaker_count=%d
 `,
 		d.detectSeconds, d.detectStartPercent, d.detectModel,
 		d.modelTranscribe, d.modelTranslate,
@@ -397,5 +425,6 @@ sub_gap_split_ms=%d
 		d.leadinMs, d.surroundMode,
 		d.subMaxCharsPerLine, d.subMaxLines, d.subMaxCPS,
 		d.subMinDurMs, d.subMaxDurMs, d.subMinGapMs, d.subGapSplitMs,
+		d.speakerThreshold, d.speakerCount,
 	)
 }

@@ -226,6 +226,19 @@ var keyDocs = map[string]KeyDoc{
 		Advice: "300–800. Lower gives more, shorter subtitles; higher joins sentences across pauses.",
 		Kind:   "int", Min: f(100), Max: f(5000), RecMin: f(300), RecMax: f(800),
 	},
+	// [speakers]
+	"speaker_threshold": {
+		Title:  "How readily voices count as different",
+		Help:   "Only used with “Mark speaker changes”. Lower: voices are told apart more readily (more speakers, one person may be split in two). Higher: similar voices count as one (two people may be merged).",
+		Advice: "0.4–0.6 (0.5 is the tested default). Lower it if two people are taken for one, raise it if one person keeps “changing”.",
+		Kind:   "float", Min: f(0.2), Max: f(0.9), RecMin: f(0.4), RecMax: f(0.6),
+	},
+	"speaker_count": {
+		Title:  "Number of speakers",
+		Help:   "Only used with “Mark speaker changes”. 0 finds the number by itself; any other value tells it exactly how many people speak, which is more reliable when you know it.",
+		Advice: "0 (automatic). Set it for interviews and dialogues with a known cast, e.g. 2.",
+		Kind:   "int", Min: f(0), Max: f(20), RecMin: f(0), RecMax: f(6),
+	},
 }
 
 // DocFor returns the description of a key (nil for unknown keys).

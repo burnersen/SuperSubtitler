@@ -59,11 +59,11 @@ func TestExpandPaths(t *testing.T) {
 }
 
 func TestSubtitleArgs(t *testing.T) {
-	args, err := SubtitleArgs(RunOptions{Language: " DE ", Translate: true, SrtOnly: true, Auto: true, Force: true, OutDir: `D:\Subs`})
+	args, err := SubtitleArgs(RunOptions{Language: " DE ", Translate: true, Speakers: true, SrtOnly: true, Auto: true, Force: true, OutDir: `D:\Subs`})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-json", "-nowait", "-nomerge", "-lang:de", "-translate", "-srtonly", "-auto", "-force", `-out:D:\Subs`}
+	want := []string{"-json", "-nowait", "-nomerge", "-lang:de", "-translate", "-speakers", "-srtonly", "-auto", "-force", `-out:D:\Subs`}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %q", args)
 	}
