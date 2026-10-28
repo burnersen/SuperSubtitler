@@ -346,3 +346,14 @@ func TestIniValuesAndDefaults(t *testing.T) {
 }
 
 func fmtSscan(s string, n *float64) (int, error) { return fmt.Sscan(s, n) }
+
+func TestParseSumsAndGUIUpdate(t *testing.T) {
+	sums := ParseSums("ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef0123456789  SuperSubtitlerGUI.exe\r\n" +
+		"0000000000000000000000000000000000000000000000000000000000000000 *SuperSubtitler.exe\nnonsense\n")
+	if sums["supersubtitlergui.exe"] != "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" || len(sums) != 2 {
+		t.Errorf("ParseSums = %v", sums)
+	}
+	if !GUIUpdate("0.3.4", "v0.3.5") || GUIUpdate("0.3.5", "v0.3.5") || GUIUpdate("0.4.0", "v0.3.5") || GUIUpdate("0.3.4", "latest") {
+		t.Error("GUIUpdate must only go forward")
+	}
+}

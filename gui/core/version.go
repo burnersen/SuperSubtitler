@@ -103,3 +103,22 @@ func (r Release) AssetURL(name string) (string, bool) {
 	}
 	return "", false
 }
+
+// ParseSums reads a SHA256SUMS.txt ("<hash>  <file>" per line) into
+// lower-case file name -> lower-case hash.
+func ParseSums(text string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && len(f[0]) == 64 {
+			out[strings.ToLower(strings.TrimPrefix(f[1], "*"))] = strings.ToLower(f[0])
+		}
+	}
+	return out
+}
+
+// GUIUpdate says whether the newest release brings a newer window.
+func GUIUpdate(running, releaseTag string) bool {
+	rel, ok := ReleaseVersion(releaseTag)
+	return ok && !AtLeast(running, rel)
+}

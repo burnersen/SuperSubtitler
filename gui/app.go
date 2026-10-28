@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,7 @@ type App struct {
 
 	window           windowState
 	windowRemembered bool
+	justUpdated      bool // this start follows an update of the window
 
 	// The batches still to run after the current one (very long file lists
 	// are split so each command line stays below the Windows limit).
@@ -49,6 +51,7 @@ func NewApp(window windowState, remembered bool) *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.justUpdated = cleanupAfterUpdate()
 	if a.windowRemembered && !a.window.Maximised &&
 		rectIsOnAScreen(a.window.X, a.window.Y, a.window.Width, a.window.Height) {
 		wailsruntime.WindowSetPosition(ctx, a.window.X, a.window.Y)
@@ -110,20 +113,37 @@ type StartupInfo struct {
 	GuiVersion string    `json:"guiVersion"`
 	Theme      string    `json:"theme"`
 	CLI        CLIStatus `json:"cli"`
+	// JustUpdated: this start follows an update of the window itself.
+	JustUpdated bool `json:"justUpdated"`
 }
 
 func (a *App) GetStartupInfo() StartupInfo {
-	return StartupInfo{GuiVersion: guiVersion, Theme: a.window.Theme, CLI: probeCLI()}
+	return StartupInfo{GuiVersion: guiVersion, Theme: a.window.Theme, CLI: probeCLI(), JustUpdated: a.justUpdated}
+}
+
+// UpdateAll brings the window and SuperSubtitler.exe to the newest release.
+// When the window itself was replaced, RestartForUpdate finishes the job.
+func (a *App) UpdateAll() (UpdateResult, error) {
+	if a.runner.Running() {
+		return UpdateResult{CLI: probeCLI()}, errors.New("not while a run is in progress")
+	}
+	return updateAll()
+}
+
+// CheckUpdate returns the newest release's version when it is newer than
+// what is installed here, else "".
+func (a *App) CheckUpdate() (string, error) { return checkUpdate() }
+
+// RestartForUpdate closes the window and starts the new one.
+func (a *App) RestartForUpdate() error {
+	if err := restartSelf(); err != nil {
+		return fmt.Errorf("could not start the new window — please start it yourself: %w", err)
+	}
+	wailsruntime.Quit(a.ctx)
+	return nil
 }
 
 func (a *App) GetCLIStatus() CLIStatus { return probeCLI() }
-
-func (a *App) DownloadCLI() (CLIStatus, error) {
-	if a.runner.Running() {
-		return CLIStatus{}, errors.New("not while a run is in progress")
-	}
-	return downloadCLI()
-}
 
 // RestoreCLIBackup puts SuperSubtitler.exe.bak back in place.
 func (a *App) RestoreCLIBackup() (CLIStatus, error) {
