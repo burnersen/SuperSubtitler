@@ -64,28 +64,48 @@ class PatchPyAVOpen(unittest.TestCase):
         self.assertIs(av.open, first)
 
 
-class Renumber(unittest.TestCase):
-    def test_speakers_are_numbered_by_first_appearance(self):
-        turns = [
-            {"start": 4.4, "end": 6.9, "speaker": 6},
-            {"start": 0.3181, "end": 4.0, "speaker": 11},
-            {"start": 7.0, "end": 9.0, "speaker": 11},
-            {"start": 9.5, "end": 10.0, "speaker": 0},
-        ]
-        self.assertEqual(transcribe.renumber(turns), [
-            {"start": 0.318, "end": 4.0, "speaker": 0},
-            {"start": 4.4, "end": 6.9, "speaker": 1},
-            {"start": 7.0, "end": 9.0, "speaker": 0},
-            {"start": 9.5, "end": 10.0, "speaker": 2},
-        ])
+class FakeLogp:
+    """Stands in for the model's output of one window: one powerset class
+    per frame (0 silence, 1-3 one voice, 4-6 two voices)."""
 
-    def test_diarize_mode_never_loads_the_whisper_engine(self):
-        # sherpa-onnx brings its own onnxruntime; faster-whisper's silence
-        # filter uses another one. They must never share a process.
+    def __init__(self, classes):
+        self.classes = classes
+
+    def argmax(self, axis):
+        return self.classes
+
+
+class SpeakerChanges(unittest.TestCase):
+    def test_a_change_between_two_voices_is_found(self):
+        # voice 1 for 1 s, a short pause, voice 2 for 1 s
+        frames = [1] * 60 + [0] * 10 + [2] * 60
+        changes = transcribe.window_changes(FakeLogp(frames))
+        self.assertEqual(len(changes), 1)
+        self.assertTrue(1.0 < changes[0] < 1.3, changes)
+
+    def test_one_voice_with_a_pause_is_no_change(self):
+        self.assertEqual(transcribe.window_changes(FakeLogp([1] * 60 + [0] * 30 + [1] * 60)), [])
+
+    def test_a_blip_too_short_to_count_is_ignored(self):
+        self.assertEqual(transcribe.window_changes(FakeLogp([1] * 60 + [2] * 3 + [1] * 60)), [])
+
+    def test_overlap_in_between_still_counts_as_a_change(self):
+        self.assertEqual(len(transcribe.window_changes(FakeLogp([1] * 60 + [4] * 10 + [2] * 60))), 1)
+
+    def test_turns_alternate_between_the_changes(self):
+        self.assertEqual(transcribe.turns_from_changes([2.5, 4.0], 6.0), [
+            {"start": 0.0, "end": 2.5, "speaker": 0},
+            {"start": 2.5, "end": 4.0, "speaker": 1},
+            {"start": 4.0, "end": 6.0, "speaker": 0},
+        ])
+        self.assertEqual(transcribe.turns_from_changes([], 3.0), [{"start": 0.0, "end": 3.0, "speaker": 0}])
+
+    def test_speaker_mode_never_loads_the_whisper_engine(self):
         import inspect
-        src = inspect.getsource(transcribe.diarize) + inspect.getsource(transcribe.read_wav_float)
+        src = "".join(inspect.getsource(f) for f in (
+            transcribe.diarize, transcribe.speaker_changes, transcribe.window_changes, transcribe.read_pcm16))
         self.assertNotIn("faster_whisper", src)
-        self.assertNotIn("onnxruntime", src)
+        self.assertNotIn("sherpa", src)
 
 
 if __name__ == "__main__":

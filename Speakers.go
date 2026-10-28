@@ -8,13 +8,22 @@ package main
 
 // Speakers.go — speaker marking (-speakers).
 //
-// After a track is transcribed, sherpa-onnx tells its voices apart on the
-// processor (transcribe.py --diarize, a process of its own) while the graphics
-// card already works on the next file. The result is a list of turns — who
-// speaks when — which Subtitle.go uses to start a new subtitle when the voice
-// changes and to put two short lines of different speakers into one subtitle
-// as "- " lines. If it fails, the subtitle is written without marks: a missing
-// mark never costs the subtitle itself.
+// After a track is transcribed, transcribe.py --diarize finds the moments the
+// speaking voice changes (pyannote segmentation 3.0 through onnxruntime, on
+// the processor, a process of its own) while the graphics card already works
+// on the next file. Who is who across the film is never needed: the subtitles
+// only show where the voice changes. The result is a list of stretches
+// between the changes, which Subtitle.go uses to start a new subtitle when
+// the voice changes and to put two short lines of different speakers into
+// one subtitle as "- " lines. If it fails, the subtitle is written without
+// marks: a missing mark never costs the subtitle itself.
+//
+// How the method was chosen: the speaker benchmark (.github/workflows/
+// speaker-benchmark.yml) scores on hand-labelled recordings how many real
+// changes are found - short ones (a reply under 2 s) on their own - and how
+// many found changes are real. Telling voices apart across the film
+// (sherpa-onnx with a speaker embedding, 0.3.0-0.3.1) found 46 % of the short
+// changes; this finds 59 % at the same precision, about 8 times faster.
 
 import (
 	"context"
@@ -24,65 +33,33 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 )
 
-// The pinned models (runtime.json): pyannote segmentation 3.0 finds where
-// speech and speaker changes are, the 3D-Speaker ERes2Net embedding tells the
-// voices apart. Chosen with the speaker benchmark (.github/workflows/
-// speaker-benchmark.yml) out of six embeddings and many thresholds: 10.75 %
-// diarization error at speaker_threshold 0.95, where the first choice
-// (CAM++ at 0.5) had 44 %.
-const (
-	speakerSegmentationModel = "speaker-segmentation"
-	speakerEmbeddingModel    = "speaker-embedding"
-)
+// speakerSegmentationModel is the pinned model (runtime.json).
+const speakerSegmentationModel = "speaker-segmentation"
 
-// speakerTurn is one stretch of one voice, in the WAV's timeline (that is,
-// including the lead-in, like the engine's word times). Speakers are numbered
-// in order of appearance from 0.
+// speakerTurn is one stretch between two voice changes, in the WAV's timeline
+// (that is, including the lead-in, like the engine's word times). Speaker
+// numbers only alternate (0, 1, 0 ...): neighbours differ, nothing more.
 type speakerTurn struct {
 	Start   float64 `json:"start"`
 	End     float64 `json:"end"`
 	Speaker int     `json:"speaker"`
 }
 
-// speakerModelFile is the .onnx file of an installed speaker model.
-func speakerModelFile(name string) (string, error) {
-	dir := modelArg(name)
-	for _, f := range pins.Models[name].Files {
-		if strings.HasSuffix(f.Name, ".onnx") {
-			return filepath.Join(dir, f.Name), nil
-		}
-	}
-	return "", fmt.Errorf("Speakers.go: %s has no .onnx file", name)
+// speakerResult is what transcribe.py --diarize writes.
+type speakerResult struct {
+	Changes []float64     `json:"changes"`
+	Turns   []speakerTurn `json:"turns"`
 }
 
-// speakerCountFor is the fixed number of speakers for this run, 0 = find out.
-func speakerCountFor(cfg *AppConfig) int {
-	if cfg.speakerCount > 0 {
-		return cfg.speakerCount
-	}
-	return appSettings.speakerCount
-}
-
-// diarize runs the speaker recognition over wavPath. onLine receives the
-// driver's "@PROGRESS x" lines.
-func diarize(ctx context.Context, cfg *AppConfig, wavPath, outPath string, onLine func(string)) ([]speakerTurn, error) {
-	seg, err := speakerModelFile(speakerSegmentationModel)
-	if err != nil {
-		return nil, err
-	}
-	emb, err := speakerModelFile(speakerEmbeddingModel)
-	if err != nil {
-		return nil, err
-	}
+// diarize finds the voice changes in wavPath. onLine receives the driver's
+// "@PROGRESS x" lines.
+func diarize(ctx context.Context, wavPath, outPath string, onLine func(string)) (*speakerResult, error) {
 	args := []string{whisperDriverPath, "--diarize",
-		"--segmentation", seg,
-		"--embedding", emb,
-		"--threshold", strconv.FormatFloat(appSettings.speakerThreshold, 'f', 2, 64),
-		"--num_speakers", strconv.Itoa(speakerCountFor(cfg)),
+		"--segmentation", filepath.Join(modelArg(speakerSegmentationModel), "model.onnx"),
+		"--threshold", strconv.FormatFloat(appSettings.speakerChangeThreshold, 'f', 2, 64),
 		"--output", outPath,
 		wavPath,
 	}
@@ -93,26 +70,15 @@ func diarize(ctx context.Context, cfg *AppConfig, wavPath, outPath string, onLin
 	if err != nil {
 		return nil, fmt.Errorf("Speakers.go: diarize (read result): %w", err)
 	}
-	return parseTurns(data)
+	return parseSpeakerResult(data)
 }
 
-func parseTurns(data []byte) ([]speakerTurn, error) {
-	var out struct {
-		Turns []speakerTurn `json:"turns"`
-	}
+func parseSpeakerResult(data []byte) (*speakerResult, error) {
+	var out speakerResult
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("Speakers.go: parseTurns: %w", err)
+		return nil, fmt.Errorf("Speakers.go: parseSpeakerResult: %w", err)
 	}
-	return out.Turns, nil
-}
-
-// countSpeakers is the number of different voices in turns.
-func countSpeakers(turns []speakerTurn) int {
-	seen := map[int]bool{}
-	for _, t := range turns {
-		seen[t.Speaker] = true
-	}
-	return len(seen)
+	return &out, nil
 }
 
 // noSpeaker marks a word no turn covers.
@@ -197,14 +163,14 @@ func shiftTurns(turns []speakerTurn, leadinSec float64) []speakerTurn {
 	return out
 }
 
-// markSpeakers runs the speaker recognition for one track and reports it. It
-// returns nil when it failed (the subtitle is then written without marks).
+// markSpeakers finds the voice changes of one track and reports them. It
+// returns nil when that failed (the subtitle is then written without marks).
 // The console gets plain lines, no bar: this runs while the next file's
 // transcription bar is on screen.
-func markSpeakers(ctx context.Context, cfg *AppConfig, job *fileJob, i int, t *trackJob) []speakerTurn {
+func markSpeakers(ctx context.Context, job *fileJob, i int, t *trackJob) []speakerTurn {
 	tlabel := trackLabelFor(job, i)
 	emitStage(job.index+1, i+1, "speakers")
-	pInfo.Printf("%s — telling speakers apart...\n", tlabel)
+	pInfo.Printf("%s — finding speaker changes...\n", tlabel)
 	started := time.Now()
 	lastEmit := -1.0
 	onLine := func(line string) {
@@ -221,17 +187,16 @@ func markSpeakers(ctx context.Context, cfg *AppConfig, job *fileJob, i int, t *t
 		}
 	}
 	out := filepath.Join(filepath.Dir(t.mainWav), "speakers.json")
-	turns, err := diarize(ctx, cfg, t.mainWav, out, onLine)
+	res, err := diarize(ctx, t.mainWav, out, onLine)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
-		pWarn.Printf("%s — speaker recognition failed, the subtitle gets no speaker marks: %s\n", tlabel, shortErr(err))
+		pWarn.Printf("%s — speaker changes could not be found, the subtitle gets no speaker marks: %s\n", tlabel, shortErr(err))
 		emitEvent(eventSpeakers{Ev: "speakers", Index: job.index + 1, Track: i + 1, Message: shortErr(err)})
 		return nil
 	}
-	n := countSpeakers(turns)
-	pInfo.Printf("%s — %d speaker(s) told apart (%s).\n", tlabel, n, fmtDuration(time.Since(started)))
-	emitEvent(eventSpeakers{Ev: "speakers", Index: job.index + 1, Track: i + 1, Count: n})
-	return turns
+	pInfo.Printf("%s — %d speaker change(s) found (%s).\n", tlabel, len(res.Changes), fmtDuration(time.Since(started)))
+	emitEvent(eventSpeakers{Ev: "speakers", Index: job.index + 1, Track: i + 1, Changes: len(res.Changes)})
+	return res.Turns
 }

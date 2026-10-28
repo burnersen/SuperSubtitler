@@ -698,7 +698,7 @@ function itemHtml(it, page) {
   if (page === "merge") meta += '<span class="lang">' + L.escapeHtml(it.kind) + "</span>";
   if (r) {
     (r.langs || []).filter(Boolean).forEach((l) => { meta += '<span class="lang" title="' + L.escapeHtml(L.languageName(l)) + '">' + L.escapeHtml(l) + "</span>"; });
-    (r.speakers || []).filter(Boolean).forEach((s) => { meta += '<span class="lang" title="' + L.escapeHtml(r.speakerNote || "Voices told apart in this track") + '">' + L.escapeHtml(s) + "</span>"; });
+    (r.speakers || []).filter(Boolean).forEach((s) => { meta += '<span class="lang" title="' + L.escapeHtml(r.speakerNote || "How often the speaking voice changes in this track") + '">' + L.escapeHtml(s) + "</span>"; });
     if (status === "working" || status === "analysing") {
       let s = L.stageText(r.stage);
       if (r.tracks > 1 && r.track) s += " · track " + r.track + "/" + r.tracks;

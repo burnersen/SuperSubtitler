@@ -63,8 +63,7 @@ type AppSettings struct {
 	subGapSplitMs      int
 
 	// Speaker marking (-speakers)
-	speakerThreshold float64 // clustering threshold: lower = more speakers
-	speakerCount     int     // 0 = find out, else exactly this many
+	speakerChangeThreshold float64 // share of looks that must agree on a change
 }
 
 // AppConfig holds per-run flag state. Populated once in main, then passed by
@@ -75,8 +74,7 @@ type AppConfig struct {
 	forcedLang    string // ISO code, "" = auto
 	translate     bool   // -translate: translate everything to English
 	split         bool   // -split: export each audio channel as WAV, skip transcription
-	speakers      bool   // -speakers[:N]: mark speaker changes in the subtitles
-	speakerCount  int    // -speakers:N: exactly N speakers, 0 = from the INI
+	speakers      bool   // -speakers: mark speaker changes in the subtitles
 	srtOnly       bool   // -srtonly: write only the .srt, no MKV
 	lean          bool   // -lean: drop foreign streams, keep video + chosen audio
 	noVad         bool   // -novad: disable the silence filter
@@ -98,41 +96,37 @@ type AppConfig struct {
 
 func defaultSettings() AppSettings {
 	return AppSettings{
-		detectSeconds:      180,
-		detectStartPercent: 10,
-		detectModel:        "large-v3-turbo",
-		modelTranscribe:    "large-v3-turbo",
-		modelTranslate:     "large-v3",
-		device:             "cuda",
-		computeType:        "float16",
-		computeTypeLowMem:  "int8",
-		beamSize:           5,
-		pythonVersion:      "3.12.10",
-		engineSpec:         defaultEngineSpec,
-		installCUDA:        true,
-		vadFilter:          true,
-		vadThreshold:       0.50,
-		vadSpeechPadMs:     400,
-		conditionPrevious:  false,
-		initialPrompt:      "",
-		leadinMs:           200,
-		surroundMode:       "center_emphasis",
-		subMaxCharsPerLine: 42,
-		subMaxLines:        2,
-		subMaxCPS:          17.0,
-		subMinDurMs:        833,
-		subMaxDurMs:        7000,
-		subMinGapMs:        83,
-		subGapSplitMs:      500,
-		speakerThreshold:   0.95,
-		speakerCount:       0,
+		detectSeconds:          180,
+		detectStartPercent:     10,
+		detectModel:            "large-v3-turbo",
+		modelTranscribe:        "large-v3-turbo",
+		modelTranslate:         "large-v3",
+		device:                 "cuda",
+		computeType:            "float16",
+		computeTypeLowMem:      "int8",
+		beamSize:               5,
+		pythonVersion:          "3.12.10",
+		engineSpec:             defaultEngineSpec,
+		installCUDA:            true,
+		vadFilter:              true,
+		vadThreshold:           0.50,
+		vadSpeechPadMs:         400,
+		conditionPrevious:      false,
+		initialPrompt:          "",
+		leadinMs:               200,
+		surroundMode:           "center_emphasis",
+		subMaxCharsPerLine:     42,
+		subMaxLines:            2,
+		subMaxCPS:              17.0,
+		subMinDurMs:            833,
+		subMaxDurMs:            7000,
+		subMinGapMs:            83,
+		subGapSplitMs:          500,
+		speakerChangeThreshold: 0.15,
 	}
 }
 
 var appSettings = defaultSettings()
-
-// maxSpeakers bounds speaker_count and -speakers:N.
-const maxSpeakers = 20
 
 // defaultEngineSpec means "the tested, pinned package set from runtime.json".
 // Any other engine_spec is installed as written, newest versions, unpinned.
@@ -161,8 +155,7 @@ func loadOrCreateAppConfig() {
 		if err := os.WriteFile(path, []byte(text), 0644); err != nil {
 			pWarn.Printf("Could not update %s: %v\n", configFileName, err)
 		} else {
-			pInfo.Println("Speaker recognition: " + configFileName + " moved to the new tested default (speaker_threshold=" +
-				strconv.FormatFloat(defaultSettings().speakerThreshold, 'f', 2, 64) + ").")
+			pInfo.Println("Speaker marking: " + configFileName + " updated to the new [speakers] settings.")
 		}
 	}
 	s := parseSettings(text)
@@ -174,27 +167,46 @@ func loadOrCreateAppConfig() {
 	appSettings = s
 }
 
-// oldSpeakerThreshold is the default 0.3.0 wrote; it belonged to its speaker
-// model and splits voices far too readily with the measured one (see the
-// speaker benchmark), so a file still holding it gets the current default.
-const oldSpeakerThreshold = "speaker_threshold=0.50"
-
-// migrateSettings updates defaults of older versions that are known to be
-// wrong now. It reports whether text changed.
+// migrateSettings updates settings files of older versions. 0.3.0 and 0.3.1
+// told voices apart across the film (speaker_threshold, speaker_count); since
+// 0.3.2 only the voice changes are found, with speaker_change_threshold. Such
+// a file gets the current [speakers] section in place of its old one. It
+// reports whether text changed.
 func migrateSettings(text string) (string, bool) {
-	current := "speaker_threshold=" + strconv.FormatFloat(defaultSettings().speakerThreshold, 'f', 2, 64)
-	if current == oldSpeakerThreshold {
-		return text, false
+	nl := "\n"
+	if strings.Contains(text, "\r\n") {
+		nl = "\r\n"
 	}
-	lines := strings.Split(text, "\n")
-	changed := false
-	for i, l := range lines {
-		if strings.TrimSpace(l) == oldSpeakerThreshold {
-			lines[i] = strings.Replace(l, oldSpeakerThreshold, current, 1)
-			changed = true
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	old := false
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "speaker_threshold=") || strings.HasPrefix(l, "speaker_count=") {
+			old = true
 		}
 	}
-	return strings.Join(lines, "\n"), changed
+	if !old {
+		return text, false
+	}
+	var out []string
+	inSpeakers := false
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "[") {
+			inSpeakers = t == "[speakers]"
+		}
+		if inSpeakers || strings.HasPrefix(t, "speaker_threshold=") || strings.HasPrefix(t, "speaker_count=") {
+			continue
+		}
+		out = append(out, l)
+	}
+	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+		out = out[:len(out)-1]
+	}
+	def := defaultConfigText()
+	section := strings.TrimRight(def[strings.Index(def, "[speakers]"):], "\n")
+	out = append(out, "", section, "")
+	return strings.ReplaceAll(strings.Join(out, "\n"), "\n", nl), true
 }
 
 func applySetting(s *AppSettings, key, val string) {
@@ -272,10 +284,8 @@ func applySetting(s *AppSettings, key, val string) {
 		s.subMinGapMs = atoi(s.subMinGapMs)
 	case "sub_gap_split_ms":
 		s.subGapSplitMs = atoi(s.subGapSplitMs)
-	case "speaker_threshold":
-		s.speakerThreshold = atof(s.speakerThreshold)
-	case "speaker_count":
-		s.speakerCount = atoi(s.speakerCount)
+	case "speaker_change_threshold":
+		s.speakerChangeThreshold = atof(s.speakerChangeThreshold)
 	}
 }
 
@@ -318,10 +328,8 @@ func settingsProblem(s AppSettings) string {
 		return "sub_min_gap_ms must be 0..1000"
 	case s.subGapSplitMs < 100 || s.subGapSplitMs > 5000:
 		return "sub_gap_split_ms must be 100..5000"
-	case s.speakerThreshold < 0.3 || s.speakerThreshold > 1.5:
-		return "speaker_threshold must be 0.3..1.5"
-	case s.speakerCount < 0 || s.speakerCount > maxSpeakers:
-		return fmt.Sprintf("speaker_count must be 0..%d", maxSpeakers)
+	case s.speakerChangeThreshold < 0.05 || s.speakerChangeThreshold > 0.9:
+		return "speaker_change_threshold must be 0.05..0.9"
 	case s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "":
 		return "detect_model, model_transcribe, model_translate and compute_type must not be empty"
 	case s.engineSpec == "" || strings.Count(s.pythonVersion, ".") < 2:
@@ -442,12 +450,11 @@ sub_gap_split_ms=%d
 [speakers]
 # Only used with -speakers: a new subtitle starts when the voice changes, and
 # two short lines of different speakers share one subtitle as "- " lines.
-# speaker_threshold: lower = voices are told apart more readily (more
-# speakers), higher = similar voices count as one; 0.85-1.05 measured best
-# (0.3..1.5 allowed). speaker_count: 0 finds the
-# number by itself; set it when you know how many people speak.
-speaker_threshold=%.2f
-speaker_count=%d
+# Every moment is looked at about nine times; speaker_change_threshold is the
+# share of those looks that must find a change there. Lower finds more
+# changes (also false ones), higher only the sure ones. 0.15-0.3 measured
+# best (0.05..0.9 allowed).
+speaker_change_threshold=%.2f
 `,
 		d.detectSeconds, d.detectStartPercent, d.detectModel,
 		d.modelTranscribe, d.modelTranslate,
@@ -458,6 +465,6 @@ speaker_count=%d
 		d.leadinMs, d.surroundMode,
 		d.subMaxCharsPerLine, d.subMaxLines, d.subMaxCPS,
 		d.subMinDurMs, d.subMaxDurMs, d.subMinGapMs, d.subGapSplitMs,
-		d.speakerThreshold, d.speakerCount,
+		d.speakerChangeThreshold,
 	)
 }

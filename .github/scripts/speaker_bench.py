@@ -1,23 +1,32 @@
 # SuperSubtitler (https://github.com/burnersen/SuperSubtitler)
 # Copyright (C) 2026 burnersen
 # SPDX-License-Identifier: GPL-3.0-only
-"""Measure how well -speakers tells voices apart.
+"""Measure how well -speakers finds the moments the speaking voice changes.
 
 The test set is a fixed part of VoxConverse (dev): political debates and news
 with 1 to 11 speakers, about 66 minutes, with hand-made labels of who speaks
 when (CC BY 4.0, https://github.com/joonson/voxconverse). Every audio file is
 checked against its SHA-256, so every run measures exactly the same thing.
 
-The speaker recognition runs through transcribe.py --diarize — the very code
-SuperSubtitler runs — with the pinned models from runtime.json (mirror first).
+The speaker marking runs through transcribe.py --diarize - the very code
+SuperSubtitler runs - with the pinned model from runtime.json (mirror first).
 
-The score is the diarization error rate (DER): the share of speech time that
-is missed, falsely detected or given to the wrong speaker; frame-based
-(10 ms), no forgiveness collar, overlapping speech counted. Lower is better.
+What subtitles need is the moment the voice changes, so that is what is
+scored. A real change lies between the end of one person's speech and the
+start of the next one's (consecutive stretches of the same person count as
+one); a found change within that gap, give or take 0.5 s, is a hit, each
+real and found change used once.
 
-    speaker_bench.py fetch DIR [--testset-only] models + test set into DIR
-    speaker_bench.py run DIR [--embedding F] [--threshold T ...] [--json OUT]
-                                               [--max-der D]
+    recall        share of the real changes that were found
+    short recall  the same for changes next to speech shorter than 2 s -
+                  the quick replies "- " lines are for
+    precision     share of the found changes that are real (a false one
+                  can put "- " lines where one person speaks)
+    F1            recall and precision in one number
+
+    speaker_bench.py fetch DIR [--testset-only] model + test set into DIR
+    speaker_bench.py run DIR [--threshold T ...] [--json OUT]
+                         [--min-f1 F] [--min-short-recall R]
 """
 import argparse
 import hashlib
@@ -55,8 +64,6 @@ TEST_SET = {
     "nrogz": "30c97601ec33f456576403b94ae982f670c5862a369a8711d3ed953c06b588bd",
     "rxgun": "ff8e997f0884fd2e6e91f3579c28fca090b9204ea7684e72a20a3b7261213dee",
 }
-
-STEP = 0.01  # DER frame length in seconds
 
 
 # ---------------------------------------------------------------------------
@@ -188,74 +195,80 @@ def read_rttm(path):
     return out
 
 
-def der(ref, hyp):
-    import numpy as np
-    from scipy.optimize import linear_sum_assignment
+TOLERANCE = 0.5   # s around the gap between two speakers
+SHORT = 2.0       # s: a change next to speech this short is a "quick" one
 
-    n = int(max([t[1] for t in ref + hyp] + [0]) / STEP) + 1
 
-    def matrix(turns):
-        names = sorted({str(t[2]) for t in turns})
-        m = np.zeros((len(names), n), dtype=bool)
-        for s, e, sp in turns:
-            m[names.index(str(sp)), max(int(round(s / STEP)), 0):min(int(round(e / STEP)), n)] = True
-        return m
+def real_changes(turns):
+    """(lo, hi, short) for every change of speaker in time order."""
+    runs = []
+    for s, e, sp in sorted(turns):
+        if runs and runs[-1][2] == sp:
+            runs[-1][1] = max(runs[-1][1], e)
+        else:
+            runs.append([s, e, sp])
+    return [(min(a[1], b[0]) - TOLERANCE, max(a[1], b[0]) + TOLERANCE,
+             min(a[1] - a[0], b[1] - b[0]) < SHORT) for a, b in zip(runs, runs[1:])]
 
-    R, H = matrix(ref), matrix(hyp)
-    nref, nhyp = R.sum(0).astype(np.int64), H.sum(0).astype(np.int64)
-    correct = np.zeros(n, dtype=np.int64)
-    if len(R) and len(H):
-        rows, cols = linear_sum_assignment(-(R.astype(np.int64) @ H.T.astype(np.int64)))
-        for r, h in zip(rows, cols):
-            correct += R[r] & H[h]
-    return {
-        "speech": nref.sum() * STEP,
-        "miss": np.maximum(nref - nhyp, 0).sum() * STEP,
-        "false": np.maximum(nhyp - nref, 0).sum() * STEP,
-        "confusion": (np.minimum(nref, nhyp) - correct).sum() * STEP,
-        "speakers": len(R),
-        "found": len(H),
-    }
+
+def match(real, found):
+    """Counts of real, found, hit (real found), used (found real), short, short hit."""
+    found = sorted(found)
+    used = [False] * len(found)
+    hits = short = short_hit = 0
+    j0 = 0
+    for lo, hi, is_short in real:
+        short += is_short
+        while j0 < len(found) and found[j0] < lo:
+            j0 += 1
+        j = j0
+        while j < len(found) and found[j] <= hi:
+            if not used[j]:
+                used[j] = True
+                hits += 1
+                short_hit += is_short
+                break
+            j += 1
+    return {"real": len(real), "found": len(found), "hit": hits, "used": sum(used),
+            "short": short, "short_hit": short_hit}
 
 
 def shipped_threshold():
-    """speaker_threshold as SuperSubtitler ships it (Config.go)."""
+    """speaker_change_threshold as SuperSubtitler ships it (Config.go)."""
     src = open(os.path.join(ROOT, "Config.go"), encoding="utf-8").read()
-    return float(re.search(r"speakerThreshold:\s*([0-9.]+)", src).group(1))
+    return float(re.search(r"speakerChangeThreshold:\s*([0-9.]+)", src).group(1))
 
 
-def evaluate(folder, seg, emb, threshold, num_speakers=0):
-    tot = {"speech": 0.0, "miss": 0.0, "false": 0.0, "confusion": 0.0}
+def evaluate(folder, seg, threshold):
+    tot = dict.fromkeys(["real", "found", "hit", "used", "short", "short_hit"], 0)
     files, started = [], time.time()
     for n in TEST_SET:
         out = os.path.join(folder, "out", "%s-%s.json" % (n, threshold))
         os.makedirs(os.path.dirname(out), exist_ok=True)
         subprocess.run([sys.executable, os.path.join(ROOT, "transcribe.py"), "--diarize",
-                        "--segmentation", seg, "--embedding", emb, "--threshold", str(threshold),
-                        "--num_speakers", str(num_speakers), "--output", out,
+                        "--segmentation", seg, "--threshold", str(threshold), "--output", out,
                         os.path.join(folder, n + ".wav")], check=True, stdout=subprocess.DEVNULL)
-        hyp = [(t["start"], t["end"], t["speaker"]) for t in json.load(open(out))["turns"]]
-        r = der(read_rttm(os.path.join(folder, n + ".rttm")), hyp)
+        r = match(real_changes(read_rttm(os.path.join(folder, n + ".rttm"))), json.load(open(out))["changes"])
         for k in tot:
             tot[k] += r[k]
-        files.append({"file": n, "speakers": r["speakers"], "found": r["found"],
-                      "der": round(100 * (r["miss"] + r["false"] + r["confusion"]) / r["speech"], 1)})
-    pct = lambda v: round(100 * v / tot["speech"], 2)  # noqa: E731
+        files.append(dict(file=n, **r))
+    pct = lambda a, b: round(100.0 * a / b, 1) if b else 0.0  # noqa: E731
+    precision, recall = pct(tot["used"], tot["found"]), pct(tot["hit"], tot["real"])
     return {
-        "embedding": os.path.basename(emb), "threshold": threshold,
-        "der": pct(tot["miss"] + tot["false"] + tot["confusion"]),
-        "miss": pct(tot["miss"]), "false": pct(tot["false"]), "confusion": pct(tot["confusion"]),
-        "count_off": round(sum(abs(f["found"] - f["speakers"]) for f in files) / len(files), 2),
+        "threshold": threshold, "precision": precision, "recall": recall,
+        "f1": round(2 * precision * recall / (precision + recall), 1) if precision + recall else 0.0,
+        "short_recall": pct(tot["short_hit"], tot["short"]),
+        "real": tot["real"], "short": tot["short"], "found": tot["found"],
         "seconds": round(time.time() - started), "files": files,
     }
 
 
 def markdown(results):
-    lines = ["| embedding | threshold | DER % | missed | false | confusion | speakers off by (avg) |",
-             "|---|---|---|---|---|---|---|"]
-    for r in sorted(results, key=lambda r: r["der"]):
-        lines.append("| %s | %s | **%s** | %s | %s | %s | %s |" % (
-            r["embedding"], r["threshold"], r["der"], r["miss"], r["false"], r["confusion"], r["count_off"]))
+    lines = ["| threshold | F1 | recall | short recall | precision | found / real |",
+             "|---|---|---|---|---|---|"]
+    for r in sorted(results, key=lambda r: -r["f1"]):
+        lines.append("| %s | **%s** | %s | %s | %s | %s / %s |" % (
+            r["threshold"], r["f1"], r["recall"], r["short_recall"], r["precision"], r["found"], r["real"]))
     return "\n".join(lines)
 
 
@@ -267,37 +280,36 @@ def main():
     f.add_argument("--testset-only", action="store_true")
     r = sub.add_parser("run")
     r.add_argument("dir")
-    r.add_argument("--embedding", help="another embedding .onnx to compare (default: the pinned one)")
-    r.add_argument("--threshold", type=float, nargs="*", help="default: the shipped speaker_threshold")
+    r.add_argument("--threshold", type=float, nargs="*", help="default: the shipped speaker_change_threshold")
     r.add_argument("--json", help="write the results here")
-    r.add_argument("--max-der", type=float, help="fail when the DER of the first threshold is above this")
+    r.add_argument("--min-f1", type=float, help="fail when the F1 of the first threshold is below this")
+    r.add_argument("--min-short-recall", type=float, help="fail when its short recall is below this")
     a = p.parse_args()
 
     seg_dir = os.path.join(a.dir, "speaker-segmentation")
-    emb_dir = os.path.join(a.dir, "speaker-embedding")
     if a.cmd == "fetch":
         if not a.testset_only:
             fetch_pinned_model("speaker-segmentation", seg_dir)
-            fetch_pinned_model("speaker-embedding", emb_dir)
         fetch_test_set(os.path.join(a.dir, "voxconverse"))
         return
-    pinned = [x["name"] for x in MANIFEST["models"]["speaker-embedding"]["files"] if x["name"].endswith(".onnx")][0]
-    emb = a.embedding or os.path.join(emb_dir, pinned)
     results = []
     for t in a.threshold or [shipped_threshold()]:
-        res = evaluate(os.path.join(a.dir, "voxconverse"), os.path.join(seg_dir, "model.onnx"), emb, t)
-        print("%s threshold %s: DER %s%% (missed %s, false %s, confusion %s), %ss" % (
-            res["embedding"], t, res["der"], res["miss"], res["false"], res["confusion"], res["seconds"]), flush=True)
+        res = evaluate(os.path.join(a.dir, "voxconverse"), os.path.join(seg_dir, "model.onnx"), t)
+        print("threshold %s: F1 %s, recall %s (short %s), precision %s, %ss" % (
+            t, res["f1"], res["recall"], res["short_recall"], res["precision"], res["seconds"]), flush=True)
         results.append(res)
     table = markdown(results)
     print(table)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as s:
-            s.write("### Speaker recognition on VoxConverse (66 min, 1-11 speakers)\n\n" + table + "\n")
+            s.write("### Speaker changes on VoxConverse (66 min, 1-11 speakers)\n\n" + table + "\n")
     if a.json:
         json.dump(results, open(a.json, "w"), indent=1)
-    if a.max_der is not None and results[0]["der"] > a.max_der:
-        raise SystemExit("DER %s%% is above the limit of %s%%" % (results[0]["der"], a.max_der))
+    first = results[0]
+    if a.min_f1 is not None and first["f1"] < a.min_f1:
+        raise SystemExit("F1 %s is below the limit of %s" % (first["f1"], a.min_f1))
+    if a.min_short_recall is not None and first["short_recall"] < a.min_short_recall:
+        raise SystemExit("short recall %s is below the limit of %s" % (first["short_recall"], a.min_short_recall))
 
 
 if __name__ == "__main__":

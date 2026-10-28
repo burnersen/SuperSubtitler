@@ -60,10 +60,6 @@ type pinnedPackage struct {
 	Size    int64  `json:"size"`
 	SHA256  string `json:"sha256"`
 	CUDA    bool   `json:"cuda"`
-	// Group "speakers": installed only when speaker marking is first used
-	// (or by -setup), with its own marker, so the core set and its lock id
-	// stay untouched for everyone who never needs it.
-	Group string `json:"group,omitempty"`
 }
 
 type modelFile struct {
@@ -198,35 +194,15 @@ func requirementsFor(pkgs []pinnedPackage) string {
 	return b.String()
 }
 
-// packagesFor lists the pinned wheels of one group of the engine (core or
-// CUDA); optional groups are not part of it.
+// packagesFor lists the pinned wheels of one group (core or CUDA).
 func (m *runtimeManifest) packagesFor(cuda bool) []pinnedPackage {
 	var out []pinnedPackage
 	for _, p := range m.Packages {
-		if p.CUDA == cuda && p.Group == "" {
+		if p.CUDA == cuda {
 			out = append(out, p)
 		}
 	}
 	return out
-}
-
-// groupPackages lists the wheels of an optional group (e.g. "speakers").
-func (m *runtimeManifest) groupPackages(group string) []pinnedPackage {
-	var out []pinnedPackage
-	for _, p := range m.Packages {
-		if p.Group == group {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// groupLockID identifies the installed set of an optional group (stored in
-// its own marker next to Python\.ss_ready).
-func (m *runtimeManifest) groupLockID(group string) string {
-	h := sha256.New()
-	io.WriteString(h, m.Python.Version+"\n"+requirementsFor(m.groupPackages(group)))
-	return fmt.Sprintf("lock:%x|%s", h.Sum(nil)[:8], group)
 }
 
 // lockID identifies the exact installed set (packages, CUDA or not, Python).

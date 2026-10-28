@@ -33,7 +33,7 @@ package main
 //	lang      the resolved language plan of a track
 //	progress  progress of a track's transcription, or of its speaker
 //	          recognition when "stage" is "speakers" (0..1, with ETA)
-//	speakers  how many speakers a track's speaker recognition found (-speakers)
+//	speakers  how many voice changes a track's speaker marking found (-speakers)
 //	question  the tool waits for one stdin line
 //	result    a file is finished (success|failed)
 //	error     a fatal error that ends the run (setup failed, no tools, …)
@@ -190,13 +190,14 @@ type eventProgress struct {
 	Stage  string  `json:"stage,omitempty"` // "speakers"; empty = transcription
 }
 
-// eventSpeakers reports the outcome of a track's speaker recognition. Count 0
-// with a Message means it failed and the subtitle has no speaker marks.
+// eventSpeakers reports the outcome of a track's speaker marking: how often
+// the voice changes. A Message means it failed and the subtitle has no
+// speaker marks.
 type eventSpeakers struct {
 	Ev      string `json:"ev"` // "speakers"
 	Index   int    `json:"index"`
 	Track   int    `json:"track,omitempty"`
-	Count   int    `json:"count"`
+	Changes int    `json:"changes"`
 	Message string `json:"message,omitempty"`
 }
 

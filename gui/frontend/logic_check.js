@@ -80,20 +80,20 @@ check("progress over several tracks never runs backwards", () => {
   assert.strictEqual(m.rows[1].pct, 1, "pct is clamped");
 });
 
-check("speaker marking: the bar shares transcription and speakers, the count is shown", () => {
+check("speaker marking: the bar shares transcription and speakers, the changes are shown", () => {
   const m = run();
   L.applyEvent(m, { ev: "run", files: 1, speakers: true });
   L.applyEvent(m, { ev: "file", index: 1, path: "C:\\V\\A.mkv", tracks: [{}] });
   L.applyEvent(m, { ev: "progress", index: 1, track: 1, tracks: 1, pct: 1 });
   assert.strictEqual(m.rows[1].pct, 0.85, "transcription fills its share only");
   L.applyEvent(m, { ev: "stage", index: 1, track: 1, stage: "speakers" });
-  assert.strictEqual(L.stageText(m.rows[1].stage), "Telling speakers apart");
+  assert.strictEqual(L.stageText(m.rows[1].stage), "Finding speaker changes");
   L.applyEvent(m, { ev: "progress", index: 1, track: 1, tracks: 1, pct: 0.5, stage: "speakers" });
   assert.ok(Math.abs(m.rows[1].pct - 0.925) < 1e-9, String(m.rows[1].pct));
   assert.strictEqual(m.rows[1].stage, "speakers");
-  L.applyEvent(m, { ev: "speakers", index: 1, track: 1, count: 3 });
-  assert.deepStrictEqual(m.rows[1].speakers, ["3 speakers"]);
-  L.applyEvent(m, { ev: "speakers", index: 1, track: 1, count: 0, message: "boom" });
+  L.applyEvent(m, { ev: "speakers", index: 1, track: 1, changes: 37 });
+  assert.deepStrictEqual(m.rows[1].speakers, ["37 speaker changes"]);
+  L.applyEvent(m, { ev: "speakers", index: 1, track: 1, changes: 0, message: "boom" });
   assert.deepStrictEqual(m.rows[1].speakers, ["no speaker marks"]);
   assert.ok(m.rows[1].speakerNote.includes("boom"));
   const plain = run();

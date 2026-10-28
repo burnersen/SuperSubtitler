@@ -227,17 +227,11 @@ var keyDocs = map[string]KeyDoc{
 		Kind:   "int", Min: f(100), Max: f(5000), RecMin: f(300), RecMax: f(800),
 	},
 	// [speakers]
-	"speaker_threshold": {
-		Title:  "How readily voices count as different",
-		Help:   "Only used with “Mark speaker changes”. Lower: voices are told apart more readily (more speakers, one person may be split in two). Higher: similar voices count as one (two people may be merged).",
-		Advice: "0.85–1.05 (0.95 is the measured best). Lower it if two people are taken for one, raise it if one person keeps “changing”.",
-		Kind:   "float", Min: f(0.3), Max: f(1.5), RecMin: f(0.85), RecMax: f(1.05),
-	},
-	"speaker_count": {
-		Title:  "Number of speakers",
-		Help:   "Only used with “Mark speaker changes”. 0 finds the number by itself; any other value tells it exactly how many people speak, which is more reliable when you know it.",
-		Advice: "0 (automatic). Set it for interviews and dialogues with a known cast, e.g. 2.",
-		Kind:   "int", Min: f(0), Max: f(20), RecMin: f(0), RecMax: f(6),
+	"speaker_change_threshold": {
+		Title:  "How sure a speaker change must be",
+		Help:   "Only used with “Mark speaker changes”. Every moment is looked at about nine times; this is the share of those looks that must find a change of voice there. Lower finds more changes, including false ones (a new subtitle or “- ” lines where only one person speaks); higher keeps only the sure ones (quick replies may be missed).",
+		Advice: "0.15–0.3 (0.15 is the measured best). Raise it if “- ” lines appear where one person speaks; lower it if quick replies are missed.",
+		Kind:   "float", Min: f(0.05), Max: f(0.9), RecMin: f(0.15), RecMax: f(0.3),
 	},
 }
 
