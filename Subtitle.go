@@ -123,51 +123,112 @@ func shiftWord(w wordTS, leadinSec float64) wordTS {
 	return w
 }
 
-// groupCues greedily packs words into cues, breaking on long pauses, when the
-// voice changes, or when the next word would exceed the character or duration
-// budget.
+// groupCues packs words into cues. A cue ends on a long pause, when the voice
+// changes, or when the next word would no longer fit the lines or the
+// duration - then, if possible, not right there but after the last sentence
+// end (or else the last comma) in it, so a subtitle does not close with the
+// first words of the next sentence. It also ends after a sentence once it is
+// half a line long: one sentence per subtitle reads best, while very short
+// ones ("Yes. I know.") stay together.
 func groupCues(words []wordTS, s AppSettings) []cue {
 	maxChars := s.subMaxCharsPerLine * s.subMaxLines
 	maxDur := float64(s.subMaxDurMs) / 1000.0
 	gapSplit := float64(s.subGapSplitMs) / 1000.0
 
 	var cues []cue
-	cur := ""
-	var curStart, curEnd float64
-	curSpeaker := noSpeaker
-
-	flush := func() {
-		if cur == "" {
+	var cur []wordTS
+	emit := func(ws []wordTS) {
+		if len(ws) == 0 {
 			return
 		}
 		cues = append(cues, cue{
-			start:   curStart,
-			end:     curEnd,
-			lines:   wrapText(cur, s.subMaxCharsPerLine, s.subMaxLines),
-			speaker: curSpeaker,
+			start:   ws[0].start,
+			end:     ws[len(ws)-1].end,
+			lines:   wrapText(joinWords(ws), s.subMaxCharsPerLine, s.subMaxLines),
+			speaker: ws[0].speaker,
 		})
-		cur = ""
 	}
 
 	for _, w := range words {
-		if cur == "" {
-			cur = w.text
-			curStart, curEnd, curSpeaker = w.start, w.end, w.speaker
-			continue
+		if len(cur) > 0 {
+			last := cur[len(cur)-1]
+			if w.start-last.end > gapSplit || w.speaker != last.speaker {
+				emit(cur)
+				cur = nil
+			}
 		}
-		gap := w.start - curEnd
-		next := joinWord(cur, w)
-		if gap > gapSplit || runeLen(next) > maxChars || (w.end-curStart) > maxDur || w.speaker != curSpeaker {
-			flush()
-			cur = w.text
-			curStart, curEnd, curSpeaker = w.start, w.end, w.speaker
-			continue
+		for len(cur) > 0 && (!fitsCue(joinWord(joinWords(cur), w), s) || w.end-cur[0].start > maxDur) {
+			k := splitPoint(cur, maxChars)
+			emit(cur[:k])
+			cur = append([]wordTS{}, cur[k:]...)
 		}
-		cur = next
-		curEnd = w.end
+		cur = append(cur, w)
+		if endsSentence(w.text) && runeLen(joinWords(cur)) >= s.subMaxCharsPerLine/2 {
+			emit(cur)
+			cur = nil
+		}
 	}
-	flush()
+	emit(cur)
 	return cues
+}
+
+// fitsCue: text wraps into the allowed lines without any line growing too
+// long (counting characters alone is not enough: words do not split).
+func fitsCue(text string, s AppSettings) bool {
+	if runeLen(text) > s.subMaxCharsPerLine*s.subMaxLines {
+		return false
+	}
+	for _, l := range wrapText(text, s.subMaxCharsPerLine, s.subMaxLines) {
+		if runeLen(l) > s.subMaxCharsPerLine {
+			return false
+		}
+	}
+	return true
+}
+
+func joinWords(ws []wordTS) string {
+	text := ""
+	for _, w := range ws {
+		text = joinWord(text, w)
+	}
+	return text
+}
+
+// splitPoint is where a cue that has grown too long is cut: after its last
+// sentence end, or else after its last comma, as long as the first part keeps
+// at least a third of the room; otherwise everything so far stays together.
+func splitPoint(ws []wordTS, maxChars int) int {
+	for _, ends := range []func(string) bool{endsSentence, endsClause} {
+		for k := len(ws) - 1; k >= 1; k-- {
+			if ends(ws[k-1].text) && runeLen(joinWords(ws[:k]))*3 >= maxChars {
+				return k
+			}
+		}
+	}
+	return len(ws)
+}
+
+// endsSentence: the word closes a sentence (". ? ! …" and their CJK forms,
+// also before a closing quote or bracket).
+func endsSentence(word string) bool {
+	return strings.ContainsAny(lastMark(word), ".?!…。？！")
+}
+
+// endsClause: the word closes a part of a sentence (comma, semicolon, colon,
+// dash).
+func endsClause(word string) bool {
+	return strings.ContainsAny(lastMark(word), ",;:–—，；：、")
+}
+
+// lastMark is the word's last character that is not a closing quote or
+// bracket.
+func lastMark(word string) string {
+	trimmed := strings.TrimRight(word, "\"'»«”’)]）」』")
+	r, _ := utf8.DecodeLastRuneInString(trimmed)
+	if r == utf8.RuneError {
+		return ""
+	}
+	return string(r)
 }
 
 // dialoguePrefix starts each line of a subtitle shared by two speakers.
@@ -371,6 +432,14 @@ func balancedSplit(units []unit, perLine int) []string {
 			score := l1
 			if l2 > l1 {
 				score = l2
+			}
+			// A line that ends where the sentence pauses reads more easily:
+			// worth a few characters of balance.
+			first := units[i-1].text
+			if endsSentence(first) {
+				score -= 8
+			} else if endsClause(first) {
+				score -= 5
 			}
 			if score < bestScore {
 				bestScore = score

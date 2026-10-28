@@ -282,3 +282,68 @@ func TestSpacedLanguagesKeepTheirSpaces(t *testing.T) {
 		t.Errorf("wrapText(de) = %q", got)
 	}
 }
+
+// wordsAt makes one engine segment of the given words, 0.3 s each, no pauses.
+func wordsAt(text string) *whisperJSON {
+	var seg whisperSegment
+	t := 1.0
+	for _, w := range strings.Fields(text) {
+		seg.Words = append(seg.Words, whisperWord{Start: t, End: t + 0.3, Word: " " + w})
+		t += 0.3
+	}
+	return &whisperJSON{Segments: []whisperSegment{seg}}
+}
+
+func cueTexts(srt string) []string {
+	var out []string
+	for _, block := range strings.Split(strings.TrimSpace(srt), "\n\n") {
+		lines := strings.Split(block, "\n")
+		out = append(out, strings.Join(lines[2:], " "))
+	}
+	return out
+}
+
+func TestCuesEndAtSentenceEnds(t *testing.T) {
+	s := defaultSettings()
+	got := cueTexts(buildSRT(wordsAt("We should leave before the storm arrives tonight. "+
+		"The roads in the north will close at eight and nobody can get through after that."), 0, s, nil))
+	if len(got) < 2 || got[0] != "We should leave before the storm arrives tonight." {
+		t.Errorf("the first sentence must be a subtitle of its own: %q", got)
+	}
+	short := cueTexts(buildSRT(wordsAt("Yes. I know. But we have to hurry now."), 0, s, nil))
+	if len(short) != 1 {
+		t.Errorf("very short sentences stay together: %q", short)
+	}
+}
+
+func TestOverlongCueIsCutAfterTheLastSentence(t *testing.T) {
+	s := defaultSettings()
+	got := cueTexts(buildSRT(wordsAt("It was late, and nobody wanted to go. "+
+		"Then the phone rang twice and everybody in the room turned around at once"), 0, s, nil))
+	if got[0] != "It was late, and nobody wanted to go." {
+		t.Errorf("the cut must come after the sentence, not mid-way into the next: %q", got)
+	}
+	for _, c := range got {
+		if strings.HasSuffix(c, " Then") {
+			t.Errorf("a subtitle ends with the first word of the next sentence: %q", c)
+		}
+	}
+}
+
+func TestLinesNeverExceedTheLimit(t *testing.T) {
+	s := defaultSettings()
+	srt := buildSRT(wordsAt("Labor Day has marked a real shift in strategy for Hillary Clinton today talking "+
+		"to reporters and launching attack after attack against Donald Trump for not releasing his tax returns"), 0, s, nil)
+	for _, l := range strings.Split(srt, "\n") {
+		if runeLen(l) > s.subMaxCharsPerLine && !strings.Contains(l, "-->") {
+			t.Errorf("line longer than %d: %q", s.subMaxCharsPerLine, l)
+		}
+	}
+}
+
+func TestLineBreakPrefersPunctuation(t *testing.T) {
+	got := wrapText("When the train finally arrived, everybody on the platform cheered", 42, 2)
+	if len(got) != 2 || got[0] != "When the train finally arrived," {
+		t.Errorf("the line should break after the comma: %q", got)
+	}
+}
