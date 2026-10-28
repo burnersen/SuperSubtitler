@@ -196,7 +196,7 @@ func ensurePython(ctx context.Context, pythonDir string) error {
 	pinned := usesPinnedEngine(appSettings)
 	want := appSettings.engineSpec
 	if pinned {
-		want = pins.lockID(appSettings.installCUDA)
+		want = pins.lockID(cudaWanted())
 	}
 
 	if markerMatches(marker, want) && fileExists(pyExe) && fileExists(driver) {
@@ -373,7 +373,7 @@ func installEngine(ctx context.Context, pyExe string, pinned bool) error {
 		if err := runPip(ctx, pyExe, spinner, "engine", "Installing whisper engine", "--upgrade", spec); err != nil {
 			return fmt.Errorf("Downloader.go: installEngine (pip install %s): %w", spec, err)
 		}
-		if appSettings.installCUDA {
+		if cudaWanted() {
 			if err := runPip(ctx, pyExe, spinner, "cuda", "Installing CUDA libraries", cudaWheels...); err != nil {
 				return fmt.Errorf("Downloader.go: installEngine (pip install cuda): %w", err)
 			}
@@ -383,7 +383,7 @@ func installEngine(ctx context.Context, pyExe string, pinned bool) error {
 	if err := installPinnedWheels(ctx, pyExe, spinner, "engine", "Installing whisper engine (tested set)", pins.packagesFor(false)); err != nil {
 		return fmt.Errorf("Downloader.go: installEngine (pinned packages): %w", err)
 	}
-	if appSettings.installCUDA {
+	if cudaWanted() {
 		if err := installPinnedWheels(ctx, pyExe, spinner, "cuda", "Installing CUDA libraries (tested set)", pins.packagesFor(true)); err != nil {
 			return fmt.Errorf("Downloader.go: installEngine (pinned CUDA packages): %w", err)
 		}

@@ -414,7 +414,8 @@ beam_size=%d
 # SHA-256 (built into the EXE). Change either value only if you know why:
 # then the newest versions are installed instead, NOT the tested set (pin
 # like faster-whisper==1.0.3 to freeze one yourself). install_cuda pulls the
-# CUDA libraries so the GPU works without a system CUDA toolkit. Delete the
+# CUDA libraries so the GPU works without a system CUDA toolkit - only when an
+# NVIDIA card is there; without one the processor is used automatically. Delete the
 # Python\ folder to rebuild from scratch.
 python_version=%s
 engine_spec=%s

@@ -54,8 +54,10 @@ jobs:
   # The real thing, end to end on Windows: the built EXE installs its pinned
   # runtime (FFmpeg, Python, pip, the exact packages - each hash-checked, the
   # mirror first), then subtitles a test video and the text is checked.
-  # The tiny model and CPU keep it fast; install_cuda=false because the runner
-  # has no GPU. This is the check that would have caught the PyAV 19 break.
+  # The tiny model keeps it fast. Device and CUDA stay at their defaults: the
+  # runner has no NVIDIA card, so SuperSubtitler must notice that by itself -
+  # no CUDA download, the processor straight away. This is also the check that
+  # would have caught the PyAV 19 break.
   e2e:
     runs-on: windows-latest
     timeout-minutes: 45
@@ -72,8 +74,7 @@ jobs:
           New-Item -ItemType Directory e2e | Out-Null
           go build -o e2e\SuperSubtitler.exe .
           Set-Content -Path e2e\SuperSubtitler_Config.ini -Value @(
-            'detect_model=tiny', 'model_transcribe=tiny', 'model_translate=tiny',
-            'device=cpu', 'compute_type=int8', 'compute_type_lowmem=int8', 'install_cuda=false')
+            'detect_model=tiny', 'model_transcribe=tiny', 'model_translate=tiny')
           Invoke-WebRequest https://raw.githubusercontent.com/openai/whisper/main/tests/jfk.flac -OutFile e2e\jfk.flac
 
       - name: setup (pinned runtime)
@@ -84,6 +85,11 @@ jobs:
           Get-Content setup.jsonl | Select-String '"ev":"(error|summary)"'
           if ($code -ne 0) { Write-Host "::error::-setup exited with $code"; exit 1 }
           Write-Host "--- installed:"; Get-Content .ss_ffmpeg; Get-Content Python\.ss_ready
+          $v = .\SuperSubtitler.exe -version | Out-String
+          Write-Host $v
+          if ($v -notmatch 'no NVIDIA') { Write-Host "::error::the runner has no NVIDIA card, but it was not noticed"; exit 1 }
+          if ((Get-Content Python\.ss_ready) -notmatch 'cuda:false') { Write-Host "::error::CUDA was installed without an NVIDIA card"; exit 1 }
+          if (Test-Path Python\Lib\site-packages\nvidia) { Write-Host "::error::CUDA libraries were downloaded without an NVIDIA card"; exit 1 }
           Get-ChildItem whisper\models\pinned
 
       - name: subtitle a test video
