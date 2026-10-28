@@ -23,7 +23,7 @@ package main
 // changes are found - short ones (a reply under 2 s) on their own - and how
 // many found changes are real. Telling voices apart across the film
 // (sherpa-onnx with a speaker embedding, 0.3.0-0.3.1) found 46 % of the short
-// changes; this finds 58 % at the same precision, about 8 times faster.
+// changes; this finds 59 % at the same precision, about 8 times faster.
 
 import (
 	"context"
