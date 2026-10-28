@@ -26,12 +26,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # The EXE embeds its own source archive (go:embed); build.bat creates it.
-      - name: pack embedded source
-        run: |
-          $inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py','.json') -contains $_.Extension -or $_.Name -eq 'LICENSE' }
-          Compress-Archive -Path $inc.FullName -DestinationPath SuperSubtitler_src.zip -Force
-
       # gofmt -l prints offenders and still exits 0; the output is the verdict.
       - name: gofmt
         run: |
@@ -75,8 +69,6 @@ jobs:
 
       - name: build
         run: |
-          $inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py','.json') -contains $_.Extension -or $_.Name -eq 'LICENSE' }
-          Compress-Archive -Path $inc.FullName -DestinationPath SuperSubtitler_src.zip -Force
           New-Item -ItemType Directory e2e | Out-Null
           go build -o e2e\SuperSubtitler.exe .
           Set-Content -Path e2e\SuperSubtitler_Config.ini -Value @(

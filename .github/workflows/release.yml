@@ -52,8 +52,6 @@ jobs:
 
       - name: build SuperSubtitler.exe
         run: |
-          $inc = Get-ChildItem -File | Where-Object { @('.go','.mod','.sum','.md','.bat','.py','.json') -contains $_.Extension -or $_.Name -eq 'LICENSE' }
-          Compress-Archive -Path $inc.FullName -DestinationPath SuperSubtitler_src.zip -Force
           New-Item -ItemType Directory dist | Out-Null
           go build -trimpath -ldflags="-s -w" -o dist\SuperSubtitler.exe .
           .\dist\SuperSubtitler.exe -version

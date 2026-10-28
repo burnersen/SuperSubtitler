@@ -49,7 +49,6 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 - 📐 **Subtitles built right.** Word-level timing, two-line wrapping, sensible characters-per-second, minimum/maximum duration and anti-flicker gaps — close to professional (Netflix/BBC) guidelines.
 - 🧹 **SRT cleaner.** A plain-text term list strips ads and hallucinated junk lines (you control every term; nothing is hard-coded).
 - 🛡️ **Resilient by design.** Stall watchdog against frozen GPU/engine, per-file crash isolation, output validation, and a Windows Job Object so killing the tool kills every helper it started — no orphan processes.
-- 📦 **Ships with its own source.** The EXE carries its own source code (Go `embed`) and extracts it on first run.
 
 ---
 
@@ -155,7 +154,7 @@ You don't have to trust me blindly:
 
 - **Scan it:** upload the EXE to [VirusTotal](https://www.virustotal.com) before running it.
 - **Read it:** the complete source code is right here in this repository.
-- **Build it yourself:** clone, run `build.bat`, done. (The downloaded EXE even carries its own source inside and extracts it on first run.)
+- **Build it yourself:** clone, run `build.bat`, done. Every release page also offers the exact source of that version as a download.
 
 If SmartScreen blocks the start: click **"More info" → "Run anyway"**.
 
@@ -169,7 +168,7 @@ build.bat
 
 The window lives in `gui/` and has its own `gui/build.bat` (writes `SuperSubtitlerGUI.exe` next to `SuperSubtitler.exe`).
 
-`build.bat` packs the embedded source archive, runs `go mod tidy` and compiles `SuperSubtitler.exe` (Go 1.22+). The only external dependency is [pterm](https://github.com/pterm/pterm). The EXE is written to the parent folder, ready to run next to its downloaded FFmpeg/Python/models. Every released EXE also extracts its own sources on first run.
+`build.bat` runs `go mod tidy` and compiles `SuperSubtitler.exe` (Go 1.22+). The only external dependency is [pterm](https://github.com/pterm/pterm). The EXE is written to the parent folder, ready to run next to its downloaded FFmpeg/Python/models.
 
 ---
 

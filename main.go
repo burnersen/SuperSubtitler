@@ -7,13 +7,9 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,12 +26,6 @@ import (
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
 const appVersion = "0.3.2"
-
-// Embedded source archive, self-extracted into src/ on first run only. The
-// build step regenerates SuperSubtitler_src.zip from the .go sources.
-//
-//go:embed SuperSubtitler_src.zip
-var embeddedSource []byte
 
 // pterm prefix printers, shared across the package.
 var (
@@ -164,7 +154,6 @@ func run() (code int) {
 		if err := initTools(ctx, cfg, true); err != nil {
 			return fatal("setup", err)
 		}
-		selfExtractSource()
 		pOK.Println("Setup complete — SuperSubtitler is ready to use.")
 		emitSummary("setup", 0, 0, 0, 0, started, false)
 		waitForEnter()
@@ -218,7 +207,6 @@ func run() (code int) {
 	if err := initTools(ctx, cfg, !cfg.split); err != nil {
 		return fatal(mode, err)
 	}
-	selfExtractSource()
 
 	if cfg.split {
 		success, failed := runDiagnosticMode(ctx, cfg, files)
@@ -468,49 +456,6 @@ func modelsNeeded(cfg *AppConfig) []string {
 		add(speakerSegmentationModel)
 	}
 	return list
-}
-
-// ----------------------------------------------------------------------------
-// Self-extract embedded source (first run only, never overwrite)
-// ----------------------------------------------------------------------------
-
-func selfExtractSource() {
-	srcDir := filepath.Join(exeDir(), "src")
-	if _, err := os.Stat(srcDir); err == nil {
-		return // already present — never overwrite
-	}
-	if len(embeddedSource) == 0 {
-		return
-	}
-	zr, err := zip.NewReader(bytes.NewReader(embeddedSource), int64(len(embeddedSource)))
-	if err != nil {
-		pWarn.Println("Could not read embedded source: " + err.Error())
-		return
-	}
-	if err := os.MkdirAll(srcDir, 0755); err != nil {
-		return
-	}
-	for _, f := range zr.File {
-		dest := filepath.Join(srcDir, filepath.FromSlash(f.Name))
-		if f.FileInfo().IsDir() {
-			_ = os.MkdirAll(dest, 0755)
-			continue
-		}
-		_ = os.MkdirAll(filepath.Dir(dest), 0755)
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		out, err := os.Create(dest)
-		if err != nil {
-			rc.Close()
-			continue
-		}
-		_, _ = io.Copy(out, rc)
-		out.Close()
-		rc.Close()
-	}
-	pInfo.Println("Extracted bundled source into " + pterm.LightCyan("src\\") + " (first run).")
 }
 
 // ----------------------------------------------------------------------------
