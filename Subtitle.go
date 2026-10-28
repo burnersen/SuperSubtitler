@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 type cue struct {
@@ -24,7 +26,8 @@ type wordTS struct {
 	start   float64
 	end     float64
 	text    string
-	speaker int // noSpeaker without speaker marking
+	speaker int  // noSpeaker without speaker marking
+	space   bool // the engine put a space before it (see joinWord)
 }
 
 // buildSRT turns engine output into a finished SRT string. leadinSec (the
@@ -53,7 +56,7 @@ func collectWords(wj *whisperJSON, leadinSec float64) []wordTS {
 			if t == "" {
 				continue
 			}
-			out = append(out, shiftWord(wordTS{seg.Start, seg.End, t, noSpeaker}, leadinSec))
+			out = append(out, shiftWord(wordTS{seg.Start, seg.End, t, noSpeaker, true}, leadinSec))
 			continue
 		}
 		for _, w := range seg.Words {
@@ -61,7 +64,7 @@ func collectWords(wj *whisperJSON, leadinSec float64) []wordTS {
 			if t == "" {
 				continue
 			}
-			out = append(out, shiftWord(wordTS{w.Start, w.End, t, noSpeaker}, leadinSec))
+			out = append(out, shiftWord(wordTS{w.Start, w.End, t, noSpeaker, startsWithSpace(w.Word)}, leadinSec))
 		}
 	}
 	// Drop anything that ended before t=0 after the shift; clamp the rest.
@@ -78,6 +81,42 @@ func collectWords(wj *whisperJSON, leadinSec float64) []wordTS {
 	return kept
 }
 
+func startsWithSpace(s string) bool {
+	r, _ := utf8.DecodeRuneInString(s)
+	return unicode.IsSpace(r)
+}
+
+// gluedScript: writing systems without spaces between words — Chinese,
+// Japanese, Thai, Lao, Khmer, Myanmar. Their words are joined as they are;
+// a space between them only where the engine itself put one (in Chinese
+// subtitles a space stands for a short pause).
+func gluedScript(r rune) bool {
+	return breakableScript(r) || unicode.In(r, unicode.Thai, unicode.Lao, unicode.Khmer, unicode.Myanmar)
+}
+
+// breakableScript: a line may break between any two of these characters
+// (Chinese characters, kana, CJK punctuation and full-width forms).
+func breakableScript(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana) ||
+		(r >= 0x3000 && r <= 0x303F) || (r >= 0xFF00 && r <= 0xFFEF)
+}
+
+// joinWord appends a word to text: with a space between words of spaced
+// languages, without one between two words of a glued script.
+func joinWord(text string, w wordTS) string {
+	if text == "" {
+		return w.text
+	}
+	last, _ := utf8.DecodeLastRuneInString(text)
+	first, _ := utf8.DecodeRuneInString(w.text)
+	if !w.space && gluedScript(last) && gluedScript(first) {
+		return text + w.text
+	}
+	return text + " " + w.text
+}
+
+func runeLen(s string) int { return utf8.RuneCountInString(s) }
+
 func shiftWord(w wordTS, leadinSec float64) wordTS {
 	w.start -= leadinSec
 	w.end -= leadinSec
@@ -93,39 +132,38 @@ func groupCues(words []wordTS, s AppSettings) []cue {
 	gapSplit := float64(s.subGapSplitMs) / 1000.0
 
 	var cues []cue
-	var curWords []string
+	cur := ""
 	var curStart, curEnd float64
 	curSpeaker := noSpeaker
 
 	flush := func() {
-		if len(curWords) == 0 {
+		if cur == "" {
 			return
 		}
-		text := strings.Join(curWords, " ")
 		cues = append(cues, cue{
 			start:   curStart,
 			end:     curEnd,
-			lines:   wrapText(text, s.subMaxCharsPerLine, s.subMaxLines),
+			lines:   wrapText(cur, s.subMaxCharsPerLine, s.subMaxLines),
 			speaker: curSpeaker,
 		})
-		curWords = nil
+		cur = ""
 	}
 
 	for _, w := range words {
-		if len(curWords) == 0 {
-			curWords = []string{w.text}
+		if cur == "" {
+			cur = w.text
 			curStart, curEnd, curSpeaker = w.start, w.end, w.speaker
 			continue
 		}
 		gap := w.start - curEnd
-		tentative := len(strings.Join(curWords, " ")) + 1 + len(w.text)
-		if gap > gapSplit || tentative > maxChars || (w.end-curStart) > maxDur || w.speaker != curSpeaker {
+		next := joinWord(cur, w)
+		if gap > gapSplit || runeLen(next) > maxChars || (w.end-curStart) > maxDur || w.speaker != curSpeaker {
 			flush()
-			curWords = []string{w.text}
+			cur = w.text
 			curStart, curEnd, curSpeaker = w.start, w.end, w.speaker
 			continue
 		}
-		curWords = append(curWords, w.text)
+		cur = next
 		curEnd = w.end
 	}
 	flush()
@@ -230,37 +268,32 @@ func cueChars(c cue) int {
 }
 
 // wrapText splits text into at most maxLines lines of at most perLine chars,
-// balancing the two-line case for readability.
+// balancing the two-line case for readability. Lines break at spaces, and in
+// Chinese and Japanese between any two characters.
 func wrapText(text string, perLine, maxLines int) []string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return []string{""}
 	}
-	if maxLines <= 1 || len([]rune(text)) <= perLine {
+	if maxLines <= 1 || runeLen(text) <= perLine {
 		return []string{text}
 	}
-	words := strings.Fields(text)
+	units := splitUnits(text)
 	if maxLines == 2 {
-		if l := balancedSplit(words, perLine); l != nil {
+		if l := balancedSplit(units, perLine); l != nil {
 			return l
 		}
 	}
-	// Greedy first-fit for the general case; no word is ever dropped.
+	// Greedy first-fit for the general case; nothing is ever dropped.
 	var lines []string
-	cur := ""
-	for _, w := range words {
-		if cur == "" {
-			cur = w
-		} else if len([]rune(cur))+1+len([]rune(w)) <= perLine {
-			cur += " " + w
-		} else {
-			lines = append(lines, cur)
-			cur = w
+	start := 0
+	for i := 1; i < len(units); i++ {
+		if runeLen(joinUnits(units[start:i+1])) > perLine {
+			lines = append(lines, joinUnits(units[start:i]))
+			start = i
 		}
 	}
-	if cur != "" {
-		lines = append(lines, cur)
-	}
+	lines = append(lines, joinUnits(units[start:]))
 	// Fold any overflow beyond maxLines into the last allowed line.
 	if len(lines) > maxLines {
 		head := append([]string{}, lines[:maxLines-1]...)
@@ -270,33 +303,85 @@ func wrapText(text string, perLine, maxLines int) []string {
 	return lines
 }
 
-// balancedSplit finds a two-line split minimising the longer line, preferring
-// splits where both lines fit perLine. Returns nil if no split fits.
-func balancedSplit(words []string, perLine int) []string {
-	best := -1
-	bestScore := 1 << 30
-	for i := 1; i < len(words); i++ {
-		l1 := len([]rune(strings.Join(words[:i], " ")))
-		l2 := len([]rune(strings.Join(words[i:], " ")))
-		if l1 > perLine || l2 > perLine {
-			continue
-		}
-		score := l1
-		if l2 > l1 {
-			score = l2
-		}
-		if score < bestScore {
-			bestScore = score
-			best = i
+// unit is the smallest piece a line may break before; space tells whether a
+// space separates it from the unit before.
+type unit struct {
+	text  string
+	space bool
+}
+
+// splitUnits cuts text at its spaces, and Chinese/Japanese runs into single
+// characters. Punctuation stays with the character before it, so no line
+// starts with "，" or "。".
+func splitUnits(text string) []unit {
+	var out []unit
+	for _, field := range strings.Fields(text) {
+		first := true
+		for _, r := range field {
+			n := len(out)
+			glue := !first && n > 0 && (unicode.IsPunct(r) ||
+				!breakableScript(r) && !breakableLast(out[n-1].text))
+			if glue {
+				out[n-1].text += string(r)
+			} else {
+				out = append(out, unit{text: string(r), space: first})
+			}
+			first = false
 		}
 	}
-	if best < 0 {
-		return nil
+	if len(out) > 0 {
+		out[0].space = false
 	}
-	return []string{
-		strings.Join(words[:best], " "),
-		strings.Join(words[best:], " "),
+	return out
+}
+
+func breakableLast(s string) bool {
+	r, _ := utf8.DecodeLastRuneInString(s)
+	return breakableScript(r)
+}
+
+func joinUnits(units []unit) string {
+	var b strings.Builder
+	for i, u := range units {
+		if i > 0 && u.space {
+			b.WriteByte(' ')
+		}
+		b.WriteString(u.text)
 	}
+	return b.String()
+}
+
+// balancedSplit finds a two-line split minimising the longer line, where both
+// lines fit perLine. A break at a space wins over one between two characters
+// (in Chinese a space marks a pause, the natural place for the break).
+// Returns nil if no split fits.
+func balancedSplit(units []unit, perLine int) []string {
+	for _, atSpaceOnly := range []bool{true, false} {
+		best := -1
+		bestScore := 1 << 30
+		for i := 1; i < len(units); i++ {
+			if atSpaceOnly && !units[i].space {
+				continue
+			}
+			l1 := runeLen(joinUnits(units[:i]))
+			l2 := runeLen(joinUnits(units[i:]))
+			if l1 > perLine || l2 > perLine {
+				continue
+			}
+			score := l1
+			if l2 > l1 {
+				score = l2
+			}
+			if score < bestScore {
+				bestScore = score
+				best = i
+			}
+		}
+		if best >= 0 {
+			return []string{joinUnits(units[:best]), joinUnits(units[best:])}
+		}
+	}
+	return nil
 }
 
 func renderSRT(cues []cue) string {

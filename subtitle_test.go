@@ -122,12 +122,12 @@ func atof(s string) float64 {
 
 func TestAssignSpeakersByOverlapAndSmoothing(t *testing.T) {
 	words := []wordTS{
-		{0.0, 0.4, "a", noSpeaker},   // before any turn: takes the first voice
-		{1.0, 1.4, "b", noSpeaker},   // speaker 0
-		{1.45, 1.85, "c", noSpeaker}, // a misjudged turn of 1 inside flowing speech of 0
-		{1.9, 2.8, "d", noSpeaker},
-		{3.5, 3.9, "e", noSpeaker}, // in a gap: keeps the voice before it
-		{5.0, 5.4, "f", noSpeaker}, // speaker 1
+		{0.0, 0.4, "a", noSpeaker, true},   // before any turn: takes the first voice
+		{1.0, 1.4, "b", noSpeaker, true},   // speaker 0
+		{1.45, 1.85, "c", noSpeaker, true}, // a misjudged turn of 1 inside flowing speech of 0
+		{1.9, 2.8, "d", noSpeaker, true},
+		{3.5, 3.9, "e", noSpeaker, true}, // in a gap: keeps the voice before it
+		{5.0, 5.4, "f", noSpeaker, true}, // speaker 1
 	}
 	turns := []speakerTurn{
 		{Start: 0.9, End: 1.45, Speaker: 0},
@@ -236,5 +236,52 @@ func TestParseTurnsAndCount(t *testing.T) {
 	sh := shiftTurns([]speakerTurn{{Start: 5, End: 6, Speaker: 1}, {Start: 1, End: 2, Speaker: 0}}, 0.2)
 	if sh[0].Start != 0.8 || sh[1].Start != 4.8 {
 		t.Errorf("shiftTurns must remove the lead-in and sort: %+v", sh)
+	}
+}
+
+func TestChineseIsJoinedWithoutSpacesAndWrapsBetweenCharacters(t *testing.T) {
+	s := defaultSettings()
+	s.subMaxCharsPerLine = 16
+	// faster-whisper's Chinese words: no leading space, except where the
+	// speaker paused (" 说").
+	wj := &whisperJSON{Segments: []whisperSegment{{Words: []whisperWord{
+		{Start: 0.2, End: 0.5, Word: "这是"}, {Start: 0.5, End: 0.8, Word: "一个"},
+		{Start: 0.8, End: 1.0, Word: "测"}, {Start: 1.0, End: 1.2, Word: "试，"},
+		{Start: 1.5, End: 1.7, Word: " 说"}, {Start: 1.7, End: 1.9, Word: "话"},
+		{Start: 1.9, End: 2.1, Word: "人"}, {Start: 2.1, End: 2.3, Word: "日"},
+		{Start: 2.3, End: 2.5, Word: "志"}, {Start: 2.5, End: 2.7, Word: "的"},
+		{Start: 2.7, End: 2.9, Word: "测试"}, {Start: 2.9, End: 3.1, Word: "音频。"},
+	}}}}
+	srt := buildSRT(wj, 0, s, nil)
+	if !strings.Contains(srt, "这是一个测试，") || !strings.Contains(srt, "说话人日志的") {
+		t.Fatalf("Chinese words must be joined without spaces:\n%s", srt)
+	}
+	for _, l := range strings.Split(srt, "\n") {
+		if runeLen(l) > 16 && !strings.Contains(l, "-->") {
+			t.Errorf("line longer than 16 characters: %q", l)
+		}
+		if strings.HasPrefix(l, "，") || strings.HasPrefix(l, "。") {
+			t.Errorf("a line must not start with punctuation: %q", l)
+		}
+	}
+	got := wrapText("这是一个测试，说话人日志的测试音频。", 10, 2)
+	if len(got) != 2 || strings.Join(got, "") != "这是一个测试，说话人日志的测试音频。" {
+		t.Errorf("wrapText(Chinese) = %q", got)
+	}
+}
+
+func TestSpacedLanguagesKeepTheirSpaces(t *testing.T) {
+	w := wordTS{text: "world", space: false} // even without the engine's space
+	if got := joinWord("Hello", w); got != "Hello world" {
+		t.Errorf("joinWord = %q", got)
+	}
+	if got := joinWord("日本", wordTS{text: "語"}); got != "日本語" {
+		t.Errorf("joinWord(ja) = %q", got)
+	}
+	if got := joinWord("这是", wordTS{text: "说", space: true}); got != "这是 说" {
+		t.Errorf("the engine's own space in Chinese stays: %q", got)
+	}
+	if got := wrapText("Grüße aus Köln, sagte der Bäcker zur Kundin am Morgen", 30, 2); strings.Join(got, " ") != "Grüße aus Köln, sagte der Bäcker zur Kundin am Morgen" {
+		t.Errorf("wrapText(de) = %q", got)
 	}
 }
