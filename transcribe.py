@@ -205,6 +205,7 @@ SEG_POWERSET = [(), (0,), (1,), (2,), (0, 1), (0, 2), (1, 2)]
 SEG_MIN_RUN = 0.1             # s of one voice before it counts
 SEG_EDGE = 0.5                # s at each window edge it cannot judge well
 SEG_MERGE = 0.3               # s: votes this close are one change
+SEG_MIN_VOTES = 2             # never one window's opinion alone (short clips)
 
 
 def read_pcm16(path):
@@ -276,7 +277,7 @@ def speaker_changes(pcm, session, threshold, progress=None):
         t = float(np.median(g))
         # windows that see t well: start in [t - span + edge, t - edge]
         seen = np.searchsorted(begin, t - SEG_EDGE, "right") - np.searchsorted(begin, t - span + SEG_EDGE, "left")
-        if seen > 0 and len(g) / seen >= threshold:
+        if len(g) >= SEG_MIN_VOTES and len(g) / seen >= threshold:
             out.append(round(t, 3))
     return out
 
