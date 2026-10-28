@@ -63,8 +63,23 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write("matrix=" + json.dumps({"include": jobs}) + "\n")
 
+  # The test set is fetched once and handed to every measuring job through
+  # the cache: dozens of jobs pulling it from Oxford at the same moment get
+  # turned away.
+  testset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: bench/voxconverse
+          key: speaker-bench-voxconverse-${{ hashFiles('.github/scripts/speaker_bench.py') }}
+          restore-keys: speaker-bench-voxconverse-
+      - name: fetch test set
+        run: python .github/scripts/speaker_bench.py fetch bench --testset-only
+
   measure:
-    needs: plan
+    needs: [plan, testset]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -83,11 +98,12 @@ jobs:
           ver=$(python -c "import json; print([p['version'] for p in json.load(open('runtime.json'))['packages'] if p['name']=='sherpa-onnx'][0])")
           pip install --quiet "sherpa-onnx==$ver" numpy scipy
 
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: bench/voxconverse
           key: speaker-bench-voxconverse-${{ hashFiles('.github/scripts/speaker_bench.py') }}
           restore-keys: speaker-bench-voxconverse-
+          fail-on-cache-miss: true
 
       - name: fetch models and test set
         run: python .github/scripts/speaker_bench.py fetch bench

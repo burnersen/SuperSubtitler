@@ -15,7 +15,7 @@ The score is the diarization error rate (DER): the share of speech time that
 is missed, falsely detected or given to the wrong speaker; frame-based
 (10 ms), no forgiveness collar, overlapping speech counted. Lower is better.
 
-    speaker_bench.py fetch DIR                 models + test set into DIR
+    speaker_bench.py fetch DIR [--testset-only] models + test set into DIR
     speaker_bench.py run DIR [--embedding F] [--threshold T ...] [--json OUT]
                                                [--max-der D]
 """
@@ -71,13 +71,28 @@ def sha256(path):
     return h.hexdigest()
 
 
+def retry(fn, tries=5):
+    """Servers turn busy clients away now and then; wait and try again."""
+    for i in range(tries):
+        try:
+            return fn()
+        except OSError as e:  # urllib errors are OSErrors
+            if i == tries - 1:
+                raise
+            print("  %s - retrying in %ss" % (e, 5 * 2 ** i), flush=True)
+            time.sleep(5 * 2 ** i)
+
+
 def fetch_url(url, dest, want=None):
     if os.path.exists(dest) and (want is None or sha256(dest) == want):
         return
     tmp = dest + ".download"
-    with urllib.request.urlopen(url) as r, open(tmp, "wb") as f:
-        for b in iter(lambda: r.read(1 << 20), b""):
-            f.write(b)
+
+    def get():
+        with urllib.request.urlopen(url, timeout=120) as r, open(tmp, "wb") as f:
+            for b in iter(lambda: r.read(1 << 20), b""):
+                f.write(b)
+    retry(get)
     if want is not None and sha256(tmp) != want:
         os.remove(tmp)
         raise SystemExit("checksum mismatch: " + url)
@@ -112,7 +127,8 @@ class RangeFile(io.RawIOBase):
 
     def __init__(self, url):
         self.url = url
-        self.size = int(urllib.request.urlopen(urllib.request.Request(url, method="HEAD")).headers["Content-Length"])
+        head = urllib.request.Request(url, method="HEAD")
+        self.size = int(retry(lambda: urllib.request.urlopen(head, timeout=60)).headers["Content-Length"])
         self.pos = 0
 
     def seekable(self):
@@ -133,7 +149,7 @@ class RangeFile(io.RawIOBase):
             return 0
         end = min(self.size, self.pos + len(b)) - 1
         req = urllib.request.Request(self.url, headers={"Range": "bytes=%d-%d" % (self.pos, end)})
-        data = urllib.request.urlopen(req).read()
+        data = retry(lambda: urllib.request.urlopen(req, timeout=120).read())
         b[:len(data)] = data
         self.pos += len(data)
         return len(data)
@@ -248,6 +264,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch")
     f.add_argument("dir")
+    f.add_argument("--testset-only", action="store_true")
     r = sub.add_parser("run")
     r.add_argument("dir")
     r.add_argument("--embedding", help="another embedding .onnx to compare (default: the pinned one)")
@@ -259,8 +276,9 @@ def main():
     seg_dir = os.path.join(a.dir, "speaker-segmentation")
     emb_dir = os.path.join(a.dir, "speaker-embedding")
     if a.cmd == "fetch":
-        fetch_pinned_model("speaker-segmentation", seg_dir)
-        fetch_pinned_model("speaker-embedding", emb_dir)
+        if not a.testset_only:
+            fetch_pinned_model("speaker-segmentation", seg_dir)
+            fetch_pinned_model("speaker-embedding", emb_dir)
         fetch_test_set(os.path.join(a.dir, "voxconverse"))
         return
     pinned = [x["name"] for x in MANIFEST["models"]["speaker-embedding"]["files"] if x["name"].endswith(".onnx")][0]
