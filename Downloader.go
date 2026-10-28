@@ -602,7 +602,7 @@ func ensureModels(ctx context.Context, models []string) error {
 func ensurePinnedModel(ctx context.Context, name string, pm pinnedModel) (string, error) {
 	dir := filepath.Join(modelDir, "pinned", name+"@"+pm.Revision[:12])
 	complete := filepath.Join(dir, ".complete")
-	if markerMatches(complete, pm.Revision) {
+	if markerMatches(complete, pm.marker()) {
 		return dir, nil
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -643,7 +643,7 @@ func ensurePinnedModel(ctx context.Context, name string, pm pinnedModel) (string
 			return "", err
 		}
 	}
-	if err := os.WriteFile(complete, []byte(pm.Revision), 0644); err != nil {
+	if err := os.WriteFile(complete, []byte(pm.marker()), 0644); err != nil {
 		return "", fmt.Errorf("Downloader.go: ensurePinnedModel (marker): %w", err)
 	}
 	if spinner != nil {

@@ -131,6 +131,17 @@ func (m *runtimeManifest) partNames(asset string, size int64) []string {
 // modelAsset is a model file's name in the mirror ("large-v3--model.bin").
 func modelAsset(model, file string) string { return model + "--" + file }
 
+// marker is what a complete installation of the model records: the revision
+// and its exact files. A new file pinned from the same revision (another
+// speaker embedding, say) must not count as already installed.
+func (pm pinnedModel) marker() string {
+	h := sha256.New()
+	for _, f := range pm.Files {
+		io.WriteString(h, f.Name+" "+f.SHA256+"\n")
+	}
+	return fmt.Sprintf("%s|%x", pm.Revision, h.Sum(nil)[:8])
+}
+
 // hfURL is the original source of a model file at the pinned revision.
 func hfURL(model pinnedModel, file string) string {
 	return "https://huggingface.co/" + model.Repo + "/resolve/" + model.Revision + "/" + file
