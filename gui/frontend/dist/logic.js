@@ -108,7 +108,9 @@
     ["da", "Danish"], ["no", "Norwegian"], ["fi", "Finnish"], ["cs", "Czech"],
     ["hu", "Hungarian"], ["ro", "Romanian"], ["el", "Greek"], ["ar", "Arabic"],
     ["he", "Hebrew"], ["hi", "Hindi"], ["ja", "Japanese"], ["ko", "Korean"],
-    ["zh", "Chinese"], ["th", "Thai"], ["vi", "Vietnamese"], ["id", "Indonesian"]
+    ["zh", "Chinese"], ["th", "Thai"], ["vi", "Vietnamese"], ["id", "Indonesian"],
+    ["fa", "Persian"], ["bn", "Bengali"], ["ms", "Malay"], ["bg", "Bulgarian"],
+    ["hr", "Croatian"], ["sr", "Serbian"], ["sk", "Slovak"], ["sl", "Slovenian"]
   ];
 
   function languageName(code) {
