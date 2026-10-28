@@ -326,3 +326,13 @@ func TestSpeakerGroupStaysOutOfTheEngine(t *testing.T) {
 		}
 	}
 }
+
+func TestModelMarkerFollowsTheFiles(t *testing.T) {
+	pm := pins.Models["speaker-embedding"]
+	other := pm
+	other.Files = append([]modelFile{}, pm.Files...)
+	other.Files[0].SHA256 = strings.Repeat("0", 64)
+	if pm.marker() == other.marker() || !strings.HasPrefix(pm.marker(), pm.Revision+"|") {
+		t.Errorf("markers %q / %q", pm.marker(), other.marker())
+	}
+}
