@@ -82,11 +82,7 @@ func boolArg(b bool) string {
 // back to CPU once if the GPU path fails. computeType is adapted for CPU. When
 // onLine is non-nil, stdout is streamed to it line by line (for live progress).
 func runWhisper(ctx context.Context, baseArgs []string, inputs []string, onLine func(string)) error {
-	device := appSettings.device
-	compute := appSettings.computeType
-	if /* cfg-driven */ lowMemActive {
-		compute = appSettings.computeTypeLowMem
-	}
+	device, compute := engineDevice(lowMemActive)
 
 	try := func(dev, comp string) error {
 		args := append([]string{}, baseArgs...)

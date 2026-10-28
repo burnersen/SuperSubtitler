@@ -25,7 +25,7 @@ import (
 
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
-const appVersion = "0.3.3"
+const appVersion = "0.3.4"
 
 // pterm prefix printers, shared across the package.
 var (
@@ -77,6 +77,7 @@ func run() (code int) {
 	if cfg.version {
 		fmt.Println(appVersion)
 		fmt.Println(runtimeSummary())
+		fmt.Println(gpuSummary())
 		return exitOK
 	}
 	// -printdefaults prints the documented default INI (for front-ends).
@@ -412,6 +413,10 @@ func initTools(ctx context.Context, cfg *AppConfig, needWhisper bool) error {
 		return nil
 	}
 
+	if appSettings.device == "cuda" && !nvidiaPresent() {
+		pInfo.Println("No NVIDIA graphics card found — the processor does the work (slower), " +
+			"and the CUDA libraries (1.3 GB) are not downloaded.")
+	}
 	whisperDir := filepath.Join(dir, "whisper")
 	modelDir = filepath.Join(whisperDir, "models")
 	if err := os.MkdirAll(modelDir, 0755); err != nil {

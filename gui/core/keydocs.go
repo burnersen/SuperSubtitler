@@ -131,8 +131,8 @@ var keyDocs = map[string]KeyDoc{
 	},
 	"install_cuda": {
 		Title:  "Install the CUDA libraries",
-		Help:   "Downloads NVIDIA's CUDA libraries (about 1.3 GB) so the graphics card works without a system-wide CUDA installation.",
-		Advice: "true. false only on machines without an NVIDIA card, to save the download.",
+		Help:   "Downloads NVIDIA's CUDA libraries (about 1.3 GB) so the graphics card works without a system-wide CUDA installation. Without an NVIDIA card they are skipped automatically and the processor is used.",
+		Advice: "true. Machines without an NVIDIA card skip the download by themselves.",
 		Kind:   "bool",
 	},
 	// [vad]
