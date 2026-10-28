@@ -575,7 +575,7 @@ function renderBanner() {
     cls = "bad";
     text = "<b>SuperSubtitler " + L.escapeHtml(cli.version) + " is too old for this window</b> (needs " + L.escapeHtml(cli.minVersion) + " or newer)." +
       (cli.backupVersion ? " Your previous version " + L.escapeHtml(cli.backupVersion) + " is still there as a backup — one click puts it back." : "");
-    button = restore || '<button class="btn primary" data-act="download">Update SuperSubtitler</button>';
+    button = restore || '<button class="btn primary" data-act="download">Update window and SuperSubtitler</button>';
   } else if (cli.problem) {
     cls = "bad";
     text = "<b>SuperSubtitler.exe does not answer:</b> " + L.escapeHtml(cli.problem);
@@ -591,7 +591,7 @@ function renderBanner() {
   const btn = b.querySelector("button");
   if (btn) {
     btn.onclick = () => {
-      if (btn.dataset.act === "download") downloadCLI();
+      if (btn.dataset.act === "download") updateAll();
       else if (btn.dataset.act === "restore") restoreCLI();
       else startSetup(false);
     };
@@ -616,18 +616,24 @@ async function restoreCLI() {
   renderAbout();
 }
 
-async function downloadCLI() {
+// updateAll brings the window and SuperSubtitler.exe to the newest release
+// in one go; when the window itself was replaced it restarts.
+async function updateAll() {
   const note = $("about-note");
   note.className = "note";
   note.textContent = "Checking the newest release …";
   try {
-    state.cli = await App().DownloadCLI();
+    const res = await App().UpdateAll();
+    state.cli = res.cli;
     note.className = "note ok";
-    note.textContent = "SuperSubtitler " + state.cli.version + " is in place.";
-    toast("SuperSubtitler " + state.cli.version + " is in place.");
+    note.textContent = res.message;
+    toast(res.message);
+    if (res.guiUpdated) {
+      setTimeout(() => { App().RestartForUpdate().catch((e) => toast(errText(e), true)); }, 1500);
+    }
   } catch (e) {
     // "Already the newest" is information, not a failure.
-    const info = /already the newest|newer than the newest|nothing to update|left as it is/.test(errText(e));
+    const info = /already the newest|newer than the newest|nothing to update|up to date/.test(errText(e));
     note.className = "note" + (info ? "" : " bad");
     note.textContent = errText(e);
     toast(errText(e), !info);
@@ -1413,7 +1419,7 @@ function renderAbout() {
     (cli.version ? cli.version + (cli.tooOld ? " — too old, needs " + cli.minVersion : "") : (cli.problem || "unknown version"));
   $("about-dir").textContent = cli.dir || "";
   $("about-setup").textContent = !cli.found ? "—" : (cli.setupComplete ? "done" : "not yet (happens at the first Start, or press Run setup now)");
-  $("about-download").textContent = cli.found ? "Update SuperSubtitler" : "Get SuperSubtitler";
+  $("about-download").textContent = cli.found ? "Update window and SuperSubtitler" : "Get SuperSubtitler";
   $("about-setup-run").disabled = state.running || !cli.found || cli.tooOld;
 }
 
@@ -1468,7 +1474,7 @@ async function init() {
   $("settings-save").onclick = saveSettings;
   $("settings-reload").onclick = () => { $("settings-note").textContent = ""; loadSettings(); };
   $("cleaner-save").onclick = saveCleaner;
-  $("about-download").onclick = downloadCLI;
+  $("about-download").onclick = updateAll;
   $("about-setup-run").onclick = () => startSetup($("about-setup-translate").checked);
   $("about-open").onclick = () => App().OpenFolder("");
   document.querySelectorAll("a.link[data-url]").forEach((a) => { a.onclick = () => window.runtime.BrowserOpenURL(a.dataset.url); });
@@ -1498,6 +1504,18 @@ async function init() {
     state.cli = info.cli;
     $("gui-version").textContent = "window " + info.guiVersion + (info.cli && info.cli.version ? " · CLI " + info.cli.version : "");
     applyTheme(info.theme);
+    if (info.justUpdated) toast("Updated to " + info.guiVersion + ".");
+    // A quiet look for a newer release; nothing is downloaded without a click.
+    setTimeout(async () => {
+      try {
+        const v = await App().CheckUpdate();
+        if (v) {
+          $("about-note").className = "note";
+          $("about-note").textContent = "Version " + v + " is available.";
+          toast("SuperSubtitler " + v + " is available — About → Update window and SuperSubtitler.");
+        }
+      } catch (e) { /* offline: no news is fine */ }
+    }, 3000);
   } catch (e) {
     applyTheme("dark");
     toast(errText(e), true);

@@ -13,6 +13,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -156,30 +159,11 @@ func setupLooksComplete(dir string) bool {
 
 var httpClient = &http.Client{Timeout: 10 * time.Minute}
 
-// downloadCLI fetches SuperSubtitler.exe from the latest GitHub release and
-// puts it next to the window — but only when that release is newer than what
-// is there and new enough for this window (core.UpdateDecision). The previous
-// exe is kept as .bak, and put back at once if the new one does not work.
-func downloadCLI() (CLIStatus, error) {
-	before := probeCLI()
-	req, err := http.NewRequest(http.MethodGet, latestReleaseAPI, nil)
-	if err != nil {
-		return before, err
-	}
-	req.Header.Set("User-Agent", "SuperSubtitlerGUI")
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return before, fmt.Errorf("asking GitHub for the latest release failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return before, fmt.Errorf("GitHub answered HTTP %d", resp.StatusCode)
-	}
-	var rel core.Release
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&rel); err != nil {
-		return before, fmt.Errorf("reading the release failed: %w", err)
-	}
+// installCLI puts the release's SuperSubtitler.exe next to the window — but
+// only when that release is newer than what is there and new enough for this
+// window (core.UpdateDecision). The previous exe is kept as .bak, and the new
+// one is checked before it replaces anything.
+func installCLI(rel core.Release, sums map[string]string, before CLIStatus) (CLIStatus, error) {
 	installed := ""
 	if before.Found && before.Problem == "" {
 		installed = before.Version
@@ -187,31 +171,8 @@ func downloadCLI() (CLIStatus, error) {
 	if ok, why := core.UpdateDecision(installed, rel.Tag); !ok {
 		return before, errors.New(why)
 	}
-	url, ok := rel.AssetURL(cliFileName)
-	if !ok {
-		return before, fmt.Errorf("release %s has no %s", rel.Tag, cliFileName)
-	}
-
-	dl, err := httpClient.Get(url)
-	if err != nil {
-		return before, fmt.Errorf("download failed: %w", err)
-	}
-	defer dl.Body.Close()
-	if dl.StatusCode != http.StatusOK {
-		return before, fmt.Errorf("download answered HTTP %d", dl.StatusCode)
-	}
 	tmp := cliPath() + ".download"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return before, err
-	}
-	if _, err := io.Copy(f, dl.Body); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return before, fmt.Errorf("download failed: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
+	if err := downloadAsset(rel, cliFileName, tmp, sums); err != nil {
 		return before, err
 	}
 	// Check the new exe BEFORE it replaces anything.
@@ -234,6 +195,76 @@ func downloadCLI() (CLIStatus, error) {
 		return probeCLI(), err
 	}
 	return probeCLI(), nil
+}
+
+// latestRelease asks GitHub for the newest release and reads its
+// SHA256SUMS.txt (name -> hash; empty when the release has none).
+func latestRelease() (core.Release, map[string]string, error) {
+	var rel core.Release
+	req, err := http.NewRequest(http.MethodGet, latestReleaseAPI, nil)
+	if err != nil {
+		return rel, nil, err
+	}
+	req.Header.Set("User-Agent", "SuperSubtitlerGUI")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return rel, nil, fmt.Errorf("asking GitHub for the latest release failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return rel, nil, fmt.Errorf("GitHub answered HTTP %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&rel); err != nil {
+		return rel, nil, fmt.Errorf("reading the release failed: %w", err)
+	}
+	sums := map[string]string{}
+	if url, ok := rel.AssetURL("SHA256SUMS.txt"); ok {
+		if r, err := httpClient.Get(url); err == nil {
+			defer r.Body.Close()
+			if r.StatusCode == http.StatusOK {
+				text, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+				sums = core.ParseSums(string(text))
+			}
+		}
+	}
+	return rel, sums, nil
+}
+
+// downloadAsset fetches one release file to dest and, when the release lists
+// a checksum for it, refuses it unless the SHA-256 matches.
+func downloadAsset(rel core.Release, name, dest string, sums map[string]string) error {
+	url, ok := rel.AssetURL(name)
+	if !ok {
+		return fmt.Errorf("release %s has no %s", rel.Tag, name)
+	}
+	dl, err := httpClient.Get(url)
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer dl.Body.Close()
+	if dl.StatusCode != http.StatusOK {
+		return fmt.Errorf("download answered HTTP %d", dl.StatusCode)
+	}
+	f, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(f, h), dl.Body); err != nil {
+		f.Close()
+		os.Remove(dest)
+		return fmt.Errorf("download failed: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(dest)
+		return err
+	}
+	if want, ok := sums[strings.ToLower(name)]; ok && !strings.EqualFold(want, hex.EncodeToString(h.Sum(nil))) {
+		os.Remove(dest)
+		return fmt.Errorf("the downloaded %s is damaged (checksum mismatch) — nothing was changed", name)
+	}
+	return nil
 }
 
 // checkConfigText lets the CLI judge new settings before they are written:

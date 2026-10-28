@@ -41,6 +41,10 @@ Every decision about a file (language, timing, layout) stays in the CLI.
 - 🔊 **Split page** — the voice gets lost? Every channel of an audio track
   becomes its own WAV (`Movie.ch02.wav` …) to listen to; then pick that channel
   under **Audio channel** on the Subtitle page (`-split` / `-channel:N`).
+- 🔄 **One-click update** — About → *Update window and SuperSubtitler*: both
+  files come from the newest release, checked against its checksums; the
+  window replaces itself and restarts. On start it quietly tells you when a
+  newer release exists.
 - ⚙️ **Settings page** built from `SuperSubtitler_Config.ini` itself: every
   value with a plain-words explanation, the recommended range and its
   default (one click puts it back). Values outside the recommendation are
