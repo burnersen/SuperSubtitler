@@ -101,3 +101,17 @@ func TestModelsNeededForTranslation(t *testing.T) {
 		t.Errorf("-to parsing: %+v", cfg)
 	}
 }
+
+// Translated subtitles keep the original's times: they may not hang on into
+// a silence either, however much longer the translation is.
+func TestTranslationIsNotSticky(t *testing.T) {
+	s := defaultSettings()
+	wj := &whisperJSON{Segments: []whisperSegment{
+		{Words: []whisperWord{{Start: 1.0, End: 1.4, Word: " Hello."}}},
+		{Words: []whisperWord{{Start: 21.0, End: 21.3, Word: " Are"}, {Start: 21.3, End: 21.5, Word: " you"}, {Start: 21.5, End: 22.0, Word: " there?"}}},
+	}}
+	cues := buildCues(wj, 0, s, nil)
+	units := translationUnits(cues)
+	out := applyTranslations(cues, units, []string{"Hallo und herzlich willkommen, schön, dass Sie da sind.", "Sind Sie wirklich noch da drüben?"}, s)
+	checkNotSticky(t, out, wj, s)
+}
