@@ -1,5 +1,5 @@
 # Measures how well -to translates: FLORES-200 sentences (translated by
-# professionals, checksummed) go from English into German, French, Spanish
+# professionals, checksummed) go from English into German, French, Spanish,
 # Italian and Russian through transcribe.py --translate_text - the code SuperSubtitler
 # runs - with the pinned model, and are scored against the human translations
 # (chrF; higher is better). Fails when a language drops below its limit.
