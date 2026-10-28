@@ -49,6 +49,11 @@ QUICK START
   the start, before the long part begins - you can walk away
   once the progress bars appear.
 
+  Several audio tracks? Every one is listened to first; the
+  best-understood track of each language is marked (*) and
+  taken when you just press Enter (commentaries and audio
+  descriptions are never suggested). "all" takes every track.
+
 OPTIONS
   -translate       Translate every track to English.
   -lang:XX         Force the source language (ISO code, e.g.
@@ -77,8 +82,9 @@ OPTIONS
   -split           Export every audio channel as a separate
                    WAV so you can listen and find where the
                    speech is; skips transcription.
-  -auto            Never ask anything: all audio tracks, the
-                   detected language, merge = yes.
+  -auto            Never ask anything: the best audio track of
+                   every language, the detected language,
+                   merge = yes.
   -force           Redo files that already have subtitles
                    (the old results are overwritten).
   -out:FOLDER      Write the .srt/.mkv results into FOLDER

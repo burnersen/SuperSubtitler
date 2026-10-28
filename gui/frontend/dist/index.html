@@ -122,6 +122,7 @@ h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
 .item .acts { grid-row: span 2; display: flex; gap: 6px; align-items: center; }
 .item .meta { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
 .item .bar { grid-column: 1 / -1; }
+.dialog .hint { font-size: 11.5px; color: var(--muted); font-family: inherit; }
 .field .hint { display: block; font-size: 11.5px; color: var(--muted); margin-top: 4px; font-weight: 400; }
 .chip { border-radius: 99px; padding: 0 8px; font-size: 11.5px; font-weight: 600; background: var(--panel-2); color: var(--muted); }
 .chip.working, .chip.analysing { color: var(--accent); background: var(--wash); }
@@ -1160,9 +1161,14 @@ function handleQuestion(q) {
       App().Answer(auto).catch((e) => toast(errText(e), true));
       return;
     }
-    let html = "<h3>Which audio tracks should get subtitles?</h3><div class=\"file\">" + file + "</div><div class=\"tracks\">";
+    const suggested = L.suggestedTracks(q);
+    let html = "<h3>Which audio tracks should get subtitles?</h3><div class=\"file\">" + file + "</div>" +
+      ((q.options || []).some((o) => o.best) ? "<p class=\"hint\">★ = the best-understood track of its language (measured), ticked for you.</p>" : "") +
+      "<div class=\"tracks\">";
     (q.options || []).forEach((o) => {
-      html += '<label><input type="checkbox" value="' + o.n + '" checked /> ' + o.n + ") " + L.escapeHtml(o.label) + "</label>";
+      html += '<label><input type="checkbox" value="' + o.n + '"' + (suggested.has(o.n) ? " checked" : "") + " /> " +
+        (o.best ? "★ " : "") + o.n + ") " + L.escapeHtml(o.label) +
+        (o.note ? ' <small class="hint">' + L.escapeHtml(o.note) + "</small>" : "") + "</label>";
     });
     html += "</div><div class=\"foot\"><label class=\"grow\"><input type=\"checkbox\" id=\"q-all\" /> Use for all following files (by language)</label>" +
       '<button class="btn small" id="q-none">None</button><button class="btn small" id="q-every">All</button>' +

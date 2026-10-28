@@ -161,7 +161,10 @@ def transcribe_one(model, args, wav):
         if s.words:
             for w in s.words:
                 words.append({"start": w.start, "end": w.end, "word": w.word})
-        seg_out.append({"start": s.start, "end": s.end, "text": s.text, "words": words})
+        # avg_logprob / no_speech_prob: how sure the model is - the Go side
+        # uses them to find the best-understood of several audio tracks.
+        seg_out.append({"start": s.start, "end": s.end, "text": s.text, "words": words,
+                        "avg_logprob": s.avg_logprob, "no_speech_prob": s.no_speech_prob})
         if emit and total > 0:
             frac = s.end / total
             sys.stdout.write("@PROGRESS %.4f\n" % (1.0 if frac > 1.0 else frac))

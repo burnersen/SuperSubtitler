@@ -230,7 +230,8 @@ type eventSummary struct {
 
 // Question kinds and the answer line each expects (same as a person types):
 //
-//	tracks          "1,3" = those audio tracks; empty = all
+//	tracks          "1,3" = those audio tracks; "all" = every track; empty =
+//	                the suggested ones (the best of every language, "best")
 //	lang_mismatch   a language code; empty = the detected language
 //	lang_unknown    a language code; empty = let the engine guess ("und")
 //	merge           "y" or "n"; empty = yes
@@ -257,6 +258,8 @@ type questionOption struct {
 	N     int    `json:"n"`
 	Label string `json:"label"`
 	Lang  string `json:"lang,omitempty"`
+	Best  bool   `json:"best,omitempty"` // tracks: the suggested track of its language
+	Note  string `json:"note,omitempty"` // tracks: why (best, commentary, clarity)
 }
 
 // ----------------------------------------------------------------------------

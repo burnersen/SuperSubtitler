@@ -34,7 +34,7 @@ check("durations and sizes", () => {
 });
 
 check("track answers are the exact console line", () => {
-  assert.strictEqual(L.tracksAnswer(new Set([1, 2, 3]), 3), "");
+  assert.strictEqual(L.tracksAnswer(new Set([1, 2, 3]), 3), "all");
   assert.strictEqual(L.tracksAnswer(new Set([3, 1]), 3), "1,3");
   assert.strictEqual(L.tracksAnswer(new Set(), 3), null, "nothing ticked is not an answer");
   assert.strictEqual(L.tracksAnswer(new Set([9]), 3), null);
@@ -44,7 +44,13 @@ const q = (langs) => ({ kind: "tracks", options: langs.map((l, i) => ({ n: i + 1
 
 check("'use for all files' answers by language, not by number", () => {
   assert.strictEqual(L.autoTracksAnswer(q(["en", "de", "fr"]), ["de"]), "2");
-  assert.strictEqual(L.autoTracksAnswer(q(["de", "en"]), ["de", "en"]), "");
+  assert.strictEqual(L.autoTracksAnswer(q(["de", "en"]), ["de", "en"]), "all");
+  const best = { kind: "tracks", options: [
+    { n: 1, lang: "de", best: false }, { n: 2, lang: "de", best: true },
+    { n: 3, lang: "en", best: true }, { n: 4, lang: "en", best: false }] };
+  assert.strictEqual(L.autoTracksAnswer(best, ["de"]), "2", "a remembered language takes its best track only");
+  assert.deepStrictEqual(Array.from(L.suggestedTracks(best)), [2, 3]);
+  assert.deepStrictEqual(Array.from(L.suggestedTracks(q(["de", "en"]))), [1, 2], "no suggestion: all");
   assert.strictEqual(L.autoTracksAnswer(q(["en", "fr"]), ["de"]), null, "missing language must show the dialog");
   assert.strictEqual(L.autoTracksAnswer(q(["de", "fr"]), ["de", "en"]), null, "a partial match must show the dialog");
   assert.strictEqual(L.autoTracksAnswer(q(["de"]), []), null);

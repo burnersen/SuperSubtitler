@@ -347,3 +347,52 @@ func TestLineBreakPrefersPunctuation(t *testing.T) {
 		t.Errorf("the line should break after the comma: %q", got)
 	}
 }
+
+// The reason this tool exists: no subtitle may stay on screen through a
+// silence. A cue ends with its speech plus at most the time needed to read
+// it (min duration / CPS), never runs into a long pause, and never lasts
+// longer than the maximum.
+func TestNoStickySubtitles(t *testing.T) {
+	s := defaultSettings()
+	wj := &whisperJSON{Segments: []whisperSegment{
+		{Words: []whisperWord{{Start: 1.0, End: 1.4, Word: " Hello."}}},
+		// 20 seconds of silence (music, a quiet scene) - nothing may hang here.
+		{Words: []whisperWord{{Start: 21.0, End: 21.3, Word: " Are"}, {Start: 21.3, End: 21.5, Word: " you"}, {Start: 21.5, End: 22.0, Word: " there?"}}},
+		{Words: []whisperWord{{Start: 40.0, End: 40.5, Word: " Yes,"}, {Start: 40.5, End: 41.0, Word: " I"}, {Start: 41.0, End: 41.4, Word: " am."}}},
+	}}
+	checkNotSticky(t, buildCues(wj, 0, s, nil), wj, s)
+}
+
+func checkNotSticky(t *testing.T, cues []cue, wj *whisperJSON, s AppSettings) {
+	t.Helper()
+	gap := float64(s.subGapSplitMs) / 1000
+	maxDur := float64(s.subMaxDurMs) / 1000
+	for _, c := range cues {
+		// the speech this cue shows: the last word ending inside it
+		lastSpeech := c.start
+		for _, seg := range wj.Segments {
+			for _, w := range seg.Words {
+				if w.Start >= c.start-0.001 && w.Start < c.end && w.End > lastSpeech {
+					lastSpeech = w.End
+				}
+			}
+		}
+		reading := float64(s.subMinDurMs) / 1000
+		if r := float64(cueChars(c)) / s.subMaxCPS; r > reading {
+			reading = r
+		}
+		if c.end-c.start > maxDur+1e-9 {
+			t.Errorf("cue %q lasts %.2fs, over the maximum", c.lines, c.end-c.start)
+		}
+		if c.end > lastSpeech+reading+1e-9 && c.end > c.start+reading+1e-9 {
+			t.Errorf("cue %q hangs on: speech ends %.2f, cue ends %.2f", c.lines, lastSpeech, c.end)
+		}
+		for _, seg := range wj.Segments {
+			for _, w := range seg.Words {
+				if w.Start > c.end && w.Start-lastSpeech > gap && c.end > w.Start {
+					t.Errorf("cue %q runs into the next speech after a pause", c.lines)
+				}
+			}
+		}
+	}
+}

@@ -25,7 +25,7 @@ import (
 
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
-const appVersion = "0.4.0"
+const appVersion = "0.4.1"
 
 // pterm prefix printers, shared across the package.
 var (
@@ -689,6 +689,10 @@ type fileJob struct {
 	duration float64
 
 	tracks []*trackJob // one per selected audio stream
+	// choose: several audio tracks and no -track — all are analysed, then
+	// the user picks (the best of every language suggested).
+	choose bool
+	total  int // files in the run (for the file event after choosing)
 
 	status  string // "ok" | "error" | "skipped"
 	outPath string
@@ -702,7 +706,9 @@ type trackJob struct {
 	stream    probeStream
 	ordinal   int // 0-based index among the file's audio streams (for -map 0:a:N)
 	detChunks []string
-	detected  string // detection vote, "" when skipped (-lang) or inconclusive
+	detected  string  // detection vote, "" when skipped (-lang) or inconclusive
+	clear     clarity // how well the detection sample was understood
+	scored    bool    // clear holds a measurement
 	mainWav   string
 	plan      langPlan
 	wj        *whisperJSON
@@ -740,7 +746,7 @@ func buildFileJobs(ctx context.Context, cfg *AppConfig, files []string) []*fileJ
 		if ctx.Err() != nil {
 			break
 		}
-		job := &fileJob{index: i, src: f}
+		job := &fileJob{index: i, src: f, total: len(files)}
 		jobs = append(jobs, job)
 		emitStage(i+1, 0, "probe")
 		pd, err := probeFile(ctx, f)
@@ -750,15 +756,13 @@ func buildFileJobs(ctx context.Context, cfg *AppConfig, files []string) []*fileJ
 			continue
 		}
 		job.duration = pd.durationSec()
-		if len(pd.audioStreams()) > 1 && cfg.forcedTrack <= 0 {
-			pInfo.Printf("%s\n", job.label()) // context for the upcoming question
-		}
-		sels, err := selectTracks(cfg, pd, f)
+		sels, choose, err := selectTracks(cfg, pd)
 		if err != nil {
 			job.fail(err)
 			emitFile(job, len(files))
 			continue
 		}
+		job.choose = choose
 		for _, s := range sels {
 			job.tracks = append(job.tracks, &trackJob{stream: s.stream, ordinal: s.ordinal})
 		}
@@ -850,18 +854,21 @@ func analyzeJobs(ctx context.Context, cfg *AppConfig, jobs []*fileJob) {
 				}
 			}
 		}
-		votes, err := detectLanguages(ctx, allChunks, outDir, onLine)
+		votes, clear, err := detectLanguages(ctx, allChunks, outDir, onLine)
 		if err != nil && ctx.Err() == nil && len(todo) > 1 {
 			pWarn.Println("Shared language detection failed — retrying file by file: " + shortErr(err))
-			votes = map[string]string{}
+			votes, clear = map[string]string{}, map[string]clarity{}
 			for _, p := range todo {
-				v, perr := detectLanguages(ctx, p.t.detChunks, filepath.Join(outDir, fmt.Sprintf("r%03d_%02d", p.job.index, p.track)), nil)
+				v, c, perr := detectLanguages(ctx, p.t.detChunks, filepath.Join(outDir, fmt.Sprintf("r%03d_%02d", p.job.index, p.track)), nil)
 				if perr != nil {
 					p.t.err = perr
 					continue
 				}
 				for k, l := range v {
 					votes[k] = l
+				}
+				for k, x := range c {
+					clear[k] = x
 				}
 			}
 			err = nil
@@ -875,6 +882,15 @@ func analyzeJobs(ctx context.Context, cfg *AppConfig, jobs []*fileJob) {
 				continue
 			}
 			p.t.detected = voteForChunks(votes, p.t.detChunks)
+			p.t.clear, p.t.scored = trackClarity(p.t.detChunks, clear)
+		}
+	}
+
+	// Files with several audio tracks: now that every track has been heard,
+	// ask which to subtitle (the best of every language suggested).
+	for _, job := range jobs {
+		if job.err == nil && job.choose && ctx.Err() == nil {
+			chooseTracks(cfg, job)
 		}
 	}
 

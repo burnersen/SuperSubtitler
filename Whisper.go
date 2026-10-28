@@ -27,10 +27,12 @@ type whisperJSON struct {
 }
 
 type whisperSegment struct {
-	Start float64       `json:"start"`
-	End   float64       `json:"end"`
-	Text  string        `json:"text"`
-	Words []whisperWord `json:"words"`
+	Start        float64       `json:"start"`
+	End          float64       `json:"end"`
+	Text         string        `json:"text"`
+	Words        []whisperWord `json:"words"`
+	AvgLogprob   float64       `json:"avg_logprob"`
+	NoSpeechProb float64       `json:"no_speech_prob"`
 }
 
 type whisperWord struct {
@@ -155,11 +157,12 @@ func readWhisperJSON(path string) (*whisperJSON, error) {
 
 // detectLanguages runs the detection model over all sample chunks in one engine
 // invocation (the model loads once) and returns the language of every chunk
-// that produced a result, keyed by chunk path. onLine, when set, receives the
-// engine's "@DONE <name>" line after each chunk.
-func detectLanguages(ctx context.Context, chunks []string, outDir string, onLine func(string)) (map[string]string, error) {
+// that produced a result, keyed by chunk path, and how well each chunk was
+// understood (see clarityOf). onLine, when set, receives the engine's
+// "@DONE <name>" line after each chunk.
+func detectLanguages(ctx context.Context, chunks []string, outDir string, onLine func(string)) (map[string]string, map[string]clarity, error) {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return nil, fmt.Errorf("Whisper.go: detectLanguages (mkdir): %w", err)
+		return nil, nil, fmt.Errorf("Whisper.go: detectLanguages (mkdir): %w", err)
 	}
 	baseArgs := []string{
 		fModel, modelArg(appSettings.detectModel),
@@ -172,9 +175,10 @@ func detectLanguages(ctx context.Context, chunks []string, outDir string, onLine
 		fVadFilter, boolArg(true),
 	}
 	if err := runWhisper(ctx, baseArgs, chunks, onLine); err != nil {
-		return nil, fmt.Errorf("Whisper.go: detectLanguages: %w", err)
+		return nil, nil, fmt.Errorf("Whisper.go: detectLanguages: %w", err)
 	}
 	langs := map[string]string{}
+	clear := map[string]clarity{}
 	for _, c := range chunks {
 		wj, err := readWhisperJSON(outputJSONPath(outDir, c))
 		if err != nil {
@@ -183,8 +187,9 @@ func detectLanguages(ctx context.Context, chunks []string, outDir string, onLine
 		if l := normalizeLang(wj.Language); l != "" {
 			langs[c] = l
 		}
+		clear[c] = clarityOf(wj)
 	}
-	return langs, nil
+	return langs, clear, nil
 }
 
 // voteForChunks majority-votes the detected language over one track's chunks.
