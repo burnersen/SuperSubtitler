@@ -33,8 +33,11 @@ type probeStream struct {
 	Index         int               `json:"index"`
 	CodecType     string            `json:"codec_type"`
 	CodecName     string            `json:"codec_name"`
+	Profile       string            `json:"profile"`
 	Channels      int               `json:"channels"`
 	ChannelLayout string            `json:"channel_layout"`
+	BitRate       string            `json:"bit_rate"`
+	Disposition   map[string]int    `json:"disposition"`
 	Tags          map[string]string `json:"tags"`
 }
 
@@ -120,49 +123,73 @@ type trackSel struct {
 // one; a single audio stream is taken without asking; several streams with no
 // -track trigger an interactive menu (Enter = all, or numbers like "1,3"), which
 // -auto answers with "all".
-func selectTracks(cfg *AppConfig, pd *probeData, file string) ([]trackSel, error) {
+// selectTracks resolves which audio streams of a file are worked on. With
+// several and no -track, all of them come back with choose set: they are
+// listened to during the analysis first, and the question (with the best
+// track of every language suggested) comes after it - see chooseTracks.
+func selectTracks(cfg *AppConfig, pd *probeData) ([]trackSel, bool, error) {
 	audio := pd.audioStreams()
 	if len(audio) == 0 {
-		return nil, fmt.Errorf("Audio.go: selectTracks: no audio stream")
+		return nil, false, fmt.Errorf("Audio.go: selectTracks: no audio stream")
 	}
 	if cfg.forcedTrack > 0 {
 		ord := cfg.forcedTrack - 1
 		if ord >= len(audio) {
-			return nil, fmt.Errorf("Audio.go: selectTracks: -track:%d out of range (file has %d audio streams)", cfg.forcedTrack, len(audio))
+			return nil, false, fmt.Errorf("Audio.go: selectTracks: -track:%d out of range (file has %d audio streams)", cfg.forcedTrack, len(audio))
 		}
-		return []trackSel{{stream: audio[ord], ordinal: ord}}, nil
+		return []trackSel{{stream: audio[ord], ordinal: ord}}, false, nil
 	}
-	if len(audio) == 1 {
-		return []trackSel{{stream: audio[0], ordinal: 0}}, nil
+	sels := make([]trackSel, len(audio))
+	for i, s := range audio {
+		sels[i] = trackSel{stream: s, ordinal: i}
 	}
-	chosen := promptTrackSelection(audio, file, cfg.auto)
-	sels := make([]trackSel, 0, len(chosen))
-	for _, ord := range chosen {
-		sels = append(sels, trackSel{stream: audio[ord], ordinal: ord})
-	}
-	return sels, nil
+	return sels, len(audio) > 1, nil
 }
 
-// promptTrackSelection lists the audio streams and asks which to subtitle.
-// Returns the 0-based ordinals; empty input (or -auto, or a closed stdin)
-// selects all.
-func promptTrackSelection(audio []probeStream, file string, auto bool) []int {
+// promptTrackSelection lists the candidates and asks which to subtitle.
+// Returns 0-based positions in cands. Enter (and -auto, and a closed stdin)
+// takes the suggested ones; "all" takes every track.
+func promptTrackSelection(cands []trackCandidate, file string, auto bool) []int {
+	suggested := bestPerLanguage(cands)
+	isBest := map[int]bool{}
+	for _, o := range suggested {
+		isBest[o] = true
+	}
 	fmt.Println()
-	pInfo.Printf("This file has %d audio tracks — which should be subtitled?\n", len(audio))
-	options := make([]questionOption, 0, len(audio))
-	for i, s := range audio {
-		label := trackLabel(s)
-		pterm.Println(pterm.LightCyan(fmt.Sprintf("  %d) %s", i+1, label)))
-		options = append(options, questionOption{N: i + 1, Label: label, Lang: containerLang(s)})
+	pInfo.Printf("This file has %d audio tracks — which should be subtitled?\n", len(cands))
+	options := make([]questionOption, 0, len(cands))
+	var defaults []int
+	for i, c := range cands {
+		label := trackLabel(c.stream)
+		note := candidateNote(c, isBest)
+		mark := "  "
+		if isBest[c.ordinal] {
+			mark = "★ "
+			defaults = append(defaults, i)
+		}
+		line := fmt.Sprintf("%s%d) %s", mark, i+1, label)
+		if note != "" {
+			line += "   [" + note + "]"
+		}
+		pterm.Println(pterm.LightCyan("  " + line))
+		options = append(options, questionOption{N: i + 1, Label: label, Lang: c.lang, Best: isBest[c.ordinal], Note: note})
+	}
+	if len(defaults) == 0 {
+		for i := range cands {
+			defaults = append(defaults, i)
+		}
 	}
 	if auto {
-		pterm.Println(pterm.Gray("  -auto: subtitling all tracks."))
-		return parseTrackChoice("", len(audio))
+		pterm.Println(pterm.Gray("  -auto: subtitling the suggested track(s) (★)."))
+		return defaults
 	}
-	pterm.Print(pterm.Gray("  Enter numbers (e.g. 1,3) or press Enter for all: "))
-	emitQuestion(eventQuestion{Kind: questionTracks, File: file, Hint: "Enter = all", Options: options, Default: "all"})
+	pterm.Print(pterm.Gray("  Enter numbers (e.g. 1,3), \"all\", or press Enter for the suggested (★): "))
+	emitQuestion(eventQuestion{Kind: questionTracks, File: file, Hint: "Enter = the suggested tracks (best per language)", Options: options, Default: "best"})
 	line, _ := readAnswerLine()
-	return parseTrackChoice(line, len(audio))
+	if strings.TrimSpace(line) == "" {
+		return defaults
+	}
+	return parseTrackChoice(line, len(cands))
 }
 
 // trackLabel renders one audio stream as "de   ac3    5.1(side)  Title".

@@ -20,9 +20,11 @@ Every decision about a file (language, timing, layout) stays in the CLI.
 
 - 🖱️ **Drag and drop** — files or folders, subfolders included.
 - ☑️ **Track chooser** — a file with several audio tracks gets a dialog with
-  tick boxes instead of typing numbers. *Use for all following files*
-  remembers the choice **by language**: German stays German in every file,
-  whatever number the track has there. A file without that language still
+  tick boxes instead of typing numbers. Every track was listened to first:
+  the **best-understood track of each language** is marked ★ and ticked
+  (commentaries and audio descriptions never are). *Use for all following
+  files* remembers the choice **by language**: German stays German — the
+  best German track — in every file, whatever number it has there. A file without that language still
   asks, so nothing is quietly taken that you did not choose.
 - 🗣️ **Language questions as buttons** — "the file says German, it sounds like
   English": one click, or *trust the detection for the rest of this run*.

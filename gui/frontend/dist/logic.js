@@ -128,15 +128,23 @@
   // Answers — exactly the line a person would type at the console
   // ------------------------------------------------------------------------
 
-  // tracksAnswer: "" when every track is ticked (the CLI's "all"), "1,3" for a
-  // subset, null when nothing is ticked (not a valid answer: the dialog must
-  // not send it, or the CLI would read "" and take all tracks).
+  // tracksAnswer: "all" when every track is ticked, "1,3" for a subset, null
+  // when nothing is ticked (not a valid answer: the dialog must not send it -
+  // an empty line means "the suggested tracks" to the CLI).
   function tracksAnswer(selected, total) {
     const ns = Array.from(selected).map(Number).filter((n) => n >= 1 && n <= total);
     const unique = Array.from(new Set(ns)).sort((a, b) => a - b);
     if (unique.length === 0) return null;
-    if (unique.length === total) return "";
+    if (unique.length === total) return "all";
     return unique.join(",");
+  }
+
+  // suggestedTracks: the track numbers the CLI suggests (the best of every
+  // language); all of them when it suggests none (an older CLI).
+  function suggestedTracks(question) {
+    const options = question.options || [];
+    const best = options.filter((o) => o.best).map((o) => o.n);
+    return new Set(best.length ? best : options.map((o) => o.n));
   }
 
   // autoTracksAnswer applies a remembered "use for all files" choice. It is
@@ -147,7 +155,10 @@
   function autoTracksAnswer(question, rememberedLangs) {
     if (!rememberedLangs || rememberedLangs.length === 0) return null;
     const options = question.options || [];
-    const picked = options.filter((o) => rememberedLangs.indexOf(o.lang || "und") >= 0);
+    const suggested = suggestedTracks(question);
+    // Per remembered language the suggested (best) track, when there is one.
+    const picked = options.filter((o) => rememberedLangs.indexOf(o.lang || "und") >= 0 &&
+      (suggested.has(o.n) || !options.some((x) => x.best && (x.lang || "und") === (o.lang || "und"))));
     const found = new Set(picked.map((o) => o.lang || "und"));
     if (!rememberedLangs.every((l) => found.has(l))) return null;
     return tracksAnswer(picked.map((o) => o.n), options.length);
@@ -486,7 +497,7 @@
     escapeHtml, ansiToHtml, formatDuration, formatMB, pathKey, baseName, dirName,
     LANGUAGES, languageName, validLanguage,
     tracksAnswer, autoTracksAnswer, rememberLangs,
-    stageText, createRun, applyEvent, finishRun, overallPercent, counts, setupProgress,
+    suggestedTracks, stageText, createRun, applyEvent, finishRun, overallPercent, counts, setupProgress,
     mergeSelection, checkSetting, crossCheck
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

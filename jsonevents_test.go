@@ -60,10 +60,18 @@ func testStreams() []probeStream {
 	}
 }
 
+func testCands() []trackCandidate {
+	var out []trackCandidate
+	for i, s := range testStreams() {
+		out = append(out, trackCandidate{ordinal: i, stream: s, lang: containerLang(s)})
+	}
+	return out
+}
+
 func TestTrackQuestionEventAndAnswer(t *testing.T) {
 	var got []int
 	events := captureEvents(t, func() {
-		withStdin("2\n", func() { got = promptTrackSelection(testStreams(), "M.mkv", false) })
+		withStdin("2\n", func() { got = promptTrackSelection(testCands(), "M.mkv", false) })
 	})
 	if !reflect.DeepEqual(got, []int{1}) {
 		t.Fatalf("answer \"2\" chose %v", got)
@@ -81,8 +89,8 @@ func TestTrackQuestionEventAndAnswer(t *testing.T) {
 func TestQuestionsFallBackWhenStdinCloses(t *testing.T) {
 	captureEvents(t, func() {
 		withStdin("", func() {
-			if got := promptTrackSelection(testStreams(), "M.mkv", false); len(got) != 2 {
-				t.Errorf("closed stdin should select all tracks, got %v", got)
+			if got := promptTrackSelection(testCands(), "M.mkv", false); len(got) != 2 {
+				t.Errorf("closed stdin should take the suggested tracks (here one per language: both), got %v", got)
 			}
 			if got := resolveLangDiscrepancy("de", "en", "M.mkv"); got != "en" {
 				t.Errorf("closed stdin should keep the detected language, got %q", got)
@@ -115,8 +123,8 @@ func TestLanguageMismatchQuestion(t *testing.T) {
 func TestAutoNeverAsks(t *testing.T) {
 	events := captureEvents(t, func() {
 		withStdin("1\n", func() {
-			if got := promptTrackSelection(testStreams(), "M.mkv", true); len(got) != 2 {
-				t.Errorf("-auto should take all tracks, got %v", got)
+			if got := promptTrackSelection(testCands(), "M.mkv", true); len(got) != 2 {
+				t.Errorf("-auto should take the suggested tracks (one per language: both), got %v", got)
 			}
 			if !askMerge("v.mkv", nil, []string{"s.srt"}, true) {
 				t.Error("-auto should merge")

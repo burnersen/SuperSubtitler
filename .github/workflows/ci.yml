@@ -135,6 +135,22 @@ jobs:
           if ($n -ne 0) { Write-Host "::error::JFK alone must have no speaker change, got $n"; exit 1 }
           if ($srt -match '(?m)^- ') { Write-Host "::error::a single voice got dialogue dashes"; exit 1 }
 
+      # Several audio tracks of one language: the best-understood one must be
+      # taken - not the one buried in noise, not the commentary.
+      - name: pick the best track
+        working-directory: e2e
+        run: |
+          .\ffmpeg.exe -v error -y -f lavfi -i color=c=black:s=320x240:r=25 -i jfk.flac -f lavfi -i "anoisesrc=color=pink:amplitude=0.8" `
+            -filter_complex "[1:a]asplit=3[a][b][c];[a][2:a]amix=inputs=2:duration=first:normalize=0[noisy]" `
+            -map 0:v -map "[noisy]" -map "[b]" -map "[c]" -shortest -c:v mpeg4 -c:a aac `
+            -metadata:s:a:0 language=eng -metadata:s:a:1 language=eng -metadata:s:a:2 language=eng -metadata:s:a:2 title="Director's Commentary" tracks.mkv
+          .\SuperSubtitler.exe -json -auto -srtonly tracks.mkv > tracks.jsonl
+          if ($LASTEXITCODE -ne 0) { Get-Content tracks.jsonl; Write-Host "::error::run exited with $LASTEXITCODE"; exit 1 }
+          $files = Get-Content tracks.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.ev -eq 'file' }
+          $chosen = @($files[-1].tracks | ForEach-Object { $_.n })
+          Write-Host "tracks chosen: $($chosen -join ',')"
+          if ($chosen.Count -ne 1 -or $chosen[0] -ne 2) { Get-Content tracks.jsonl; Write-Host "::error::expected only track 2 (the clear one), got $($chosen -join ',')"; exit 1 }
+
       # Translation (-to): JFK into German, a second subtitle file next to the
       # English one. The 3 GB model makes this the slowest step.
       - name: translate
