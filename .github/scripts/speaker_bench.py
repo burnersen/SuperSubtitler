@@ -79,12 +79,15 @@ def sha256(path):
 
 
 def retry(fn, tries=5):
-    """Servers turn busy clients away now and then; wait and try again."""
+    """Servers turn busy clients away now and then; wait and try again. A
+    plain "not there" (404 and other 4xx but 429) is final at once."""
+    import urllib.error
     for i in range(tries):
         try:
             return fn()
         except OSError as e:  # urllib errors are OSErrors
-            if i == tries - 1:
+            final = isinstance(e, urllib.error.HTTPError) and 400 <= e.code < 500 and e.code != 429
+            if final or i == tries - 1:
                 raise
             print("  %s - retrying in %ss" % (e, 5 * 2 ** i), flush=True)
             time.sleep(5 * 2 ** i)
