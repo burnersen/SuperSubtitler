@@ -16,6 +16,14 @@ on:
         description: 'Compare embedding models and thresholds'
         type: boolean
         default: false
+      candidates:
+        description: 'Sweep only: embedding files (space-separated; empty = the list below)'
+        type: string
+        default: ''
+      thresholds:
+        description: 'Sweep only: thresholds (space-separated; empty = the list below)'
+        type: string
+        default: ''
   push:
     paths:
       - Speakers.go
@@ -53,11 +61,14 @@ jobs:
         shell: python
         env:
           SWEEP: ${{ inputs.sweep && 'yes' || 'no' }}
+          IN_CANDIDATES: ${{ inputs.candidates }}
+          IN_THRESHOLDS: ${{ inputs.thresholds }}
         run: |
           import json, os
           if os.environ["SWEEP"] == "yes":
-              jobs = [{"embedding": e, "threshold": t}
-                      for e in os.environ["CANDIDATES"].split() for t in os.environ["THRESHOLDS"].split()]
+              cands = (os.environ.get("IN_CANDIDATES") or os.environ["CANDIDATES"]).split()
+              thrs = (os.environ.get("IN_THRESHOLDS") or os.environ["THRESHOLDS"]).split()
+              jobs = [{"embedding": e, "threshold": t} for e in cands for t in thrs]
           else:
               jobs = [{"embedding": "pinned", "threshold": "shipped"}]
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
