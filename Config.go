@@ -124,7 +124,7 @@ func defaultSettings() AppSettings {
 		subMaxDurMs:        7000,
 		subMinGapMs:        83,
 		subGapSplitMs:      500,
-		speakerThreshold:   0.5,
+		speakerThreshold:   0.95,
 		speakerCount:       0,
 	}
 }
@@ -318,8 +318,8 @@ func settingsProblem(s AppSettings) string {
 		return "sub_min_gap_ms must be 0..1000"
 	case s.subGapSplitMs < 100 || s.subGapSplitMs > 5000:
 		return "sub_gap_split_ms must be 100..5000"
-	case s.speakerThreshold < 0.2 || s.speakerThreshold > 0.9:
-		return "speaker_threshold must be 0.2..0.9"
+	case s.speakerThreshold < 0.3 || s.speakerThreshold > 1.5:
+		return "speaker_threshold must be 0.3..1.5"
 	case s.speakerCount < 0 || s.speakerCount > maxSpeakers:
 		return fmt.Sprintf("speaker_count must be 0..%d", maxSpeakers)
 	case s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "":
@@ -443,7 +443,8 @@ sub_gap_split_ms=%d
 # Only used with -speakers: a new subtitle starts when the voice changes, and
 # two short lines of different speakers share one subtitle as "- " lines.
 # speaker_threshold: lower = voices are told apart more readily (more
-# speakers), higher = similar voices count as one. speaker_count: 0 finds the
+# speakers), higher = similar voices count as one; 0.85-1.05 measured best
+# (0.3..1.5 allowed). speaker_count: 0 finds the
 # number by itself; set it when you know how many people speak.
 speaker_threshold=%.2f
 speaker_count=%d

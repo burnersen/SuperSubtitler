@@ -37,8 +37,9 @@ permissions:
   contents: read
 
 env:
-  # The DER of the shipped setup may not rise above this (percent).
-  MAX_DER: '100'
+  # The DER of the shipped setup may not rise above this (percent). Measured
+  # for ERes2Net at 0.95: 10.75.
+  MAX_DER: '12.5'
   # Candidates for the sweep, all from the repository and revision the pinned
   # embedding comes from.
   CANDIDATES: >-

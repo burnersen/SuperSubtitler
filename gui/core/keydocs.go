@@ -230,8 +230,8 @@ var keyDocs = map[string]KeyDoc{
 	"speaker_threshold": {
 		Title:  "How readily voices count as different",
 		Help:   "Only used with “Mark speaker changes”. Lower: voices are told apart more readily (more speakers, one person may be split in two). Higher: similar voices count as one (two people may be merged).",
-		Advice: "0.4–0.6 (0.5 is the tested default). Lower it if two people are taken for one, raise it if one person keeps “changing”.",
-		Kind:   "float", Min: f(0.2), Max: f(0.9), RecMin: f(0.4), RecMax: f(0.6),
+		Advice: "0.85–1.05 (0.95 is the measured best). Lower it if two people are taken for one, raise it if one person keeps “changing”.",
+		Kind:   "float", Min: f(0.3), Max: f(1.5), RecMin: f(0.85), RecMax: f(1.05),
 	},
 	"speaker_count": {
 		Title:  "Number of speakers",
