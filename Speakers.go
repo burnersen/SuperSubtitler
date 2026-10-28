@@ -29,8 +29,11 @@ import (
 )
 
 // The pinned models (runtime.json): pyannote segmentation 3.0 finds where
-// speech and speaker changes are, the 3D-Speaker CAM++ embedding tells the
-// voices apart.
+// speech and speaker changes are, the 3D-Speaker ERes2Net embedding tells the
+// voices apart. Chosen with the speaker benchmark (.github/workflows/
+// speaker-benchmark.yml) out of six embeddings and many thresholds: 10.75 %
+// diarization error at speaker_threshold 0.95, where the first choice
+// (CAM++ at 0.5) had 44 %.
 const (
 	speakerSegmentationModel = "speaker-segmentation"
 	speakerEmbeddingModel    = "speaker-embedding"

@@ -124,7 +124,7 @@ func defaultSettings() AppSettings {
 		subMaxDurMs:        7000,
 		subMinGapMs:        83,
 		subGapSplitMs:      500,
-		speakerThreshold:   0.5,
+		speakerThreshold:   0.95,
 		speakerCount:       0,
 	}
 }
@@ -156,13 +156,45 @@ func loadOrCreateAppConfig() {
 		writeDefaultConfig(path)
 		return
 	}
-	s := parseSettings(string(data))
+	text, migrated := migrateSettings(string(data))
+	if migrated {
+		if err := os.WriteFile(path, []byte(text), 0644); err != nil {
+			pWarn.Printf("Could not update %s: %v\n", configFileName, err)
+		} else {
+			pInfo.Println("Speaker recognition: " + configFileName + " moved to the new tested default (speaker_threshold=" +
+				strconv.FormatFloat(defaultSettings().speakerThreshold, 'f', 2, 64) + ").")
+		}
+	}
+	s := parseSettings(text)
 	if !validateSettings(s) {
 		pWarn.Println("Invalid value in " + configFileName + " — file reset to defaults.")
 		writeDefaultConfig(path)
 		return
 	}
 	appSettings = s
+}
+
+// oldSpeakerThreshold is the default 0.3.0 wrote; it belonged to its speaker
+// model and splits voices far too readily with the measured one (see the
+// speaker benchmark), so a file still holding it gets the current default.
+const oldSpeakerThreshold = "speaker_threshold=0.50"
+
+// migrateSettings updates defaults of older versions that are known to be
+// wrong now. It reports whether text changed.
+func migrateSettings(text string) (string, bool) {
+	current := "speaker_threshold=" + strconv.FormatFloat(defaultSettings().speakerThreshold, 'f', 2, 64)
+	if current == oldSpeakerThreshold {
+		return text, false
+	}
+	lines := strings.Split(text, "\n")
+	changed := false
+	for i, l := range lines {
+		if strings.TrimSpace(l) == oldSpeakerThreshold {
+			lines[i] = strings.Replace(l, oldSpeakerThreshold, current, 1)
+			changed = true
+		}
+	}
+	return strings.Join(lines, "\n"), changed
 }
 
 func applySetting(s *AppSettings, key, val string) {
@@ -286,8 +318,8 @@ func settingsProblem(s AppSettings) string {
 		return "sub_min_gap_ms must be 0..1000"
 	case s.subGapSplitMs < 100 || s.subGapSplitMs > 5000:
 		return "sub_gap_split_ms must be 100..5000"
-	case s.speakerThreshold < 0.2 || s.speakerThreshold > 0.9:
-		return "speaker_threshold must be 0.2..0.9"
+	case s.speakerThreshold < 0.3 || s.speakerThreshold > 1.5:
+		return "speaker_threshold must be 0.3..1.5"
 	case s.speakerCount < 0 || s.speakerCount > maxSpeakers:
 		return fmt.Sprintf("speaker_count must be 0..%d", maxSpeakers)
 	case s.detectModel == "" || s.modelTranscribe == "" || s.modelTranslate == "" || s.computeType == "":
@@ -411,7 +443,8 @@ sub_gap_split_ms=%d
 # Only used with -speakers: a new subtitle starts when the voice changes, and
 # two short lines of different speakers share one subtitle as "- " lines.
 # speaker_threshold: lower = voices are told apart more readily (more
-# speakers), higher = similar voices count as one. speaker_count: 0 finds the
+# speakers), higher = similar voices count as one; 0.85-1.05 measured best
+# (0.3..1.5 allowed). speaker_count: 0 finds the
 # number by itself; set it when you know how many people speak.
 speaker_threshold=%.2f
 speaker_count=%d

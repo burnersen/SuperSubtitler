@@ -29,7 +29,7 @@ import (
 
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
-const appVersion = "0.3.0"
+const appVersion = "0.3.1"
 
 // Embedded source archive, self-extracted into src/ on first run only. The
 // build step regenerates SuperSubtitler_src.zip from the .go sources.
