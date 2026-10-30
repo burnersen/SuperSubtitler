@@ -27,10 +27,24 @@ type RunOptions struct {
 	// TranslateTo adds the subtitles in this language too (-to:XX); "" = none.
 	TranslateTo string `json:"translateTo"`
 	OutDir      string `json:"outDir"` // "" = next to the source
+	// Container is the video file: "mkv" or "mp4" (-mkv / -mp4); "" leaves
+	// it to the INI's container setting.
+	Container string `json:"container"`
 	// Channel is the physical channel to isolate ("0", "2", …), "" = the
 	// automatic voice-focused downmix. A string on purpose: an int would make
 	// a missing value mean "channel 0" instead of "automatic".
 	Channel string `json:"channel"`
+}
+
+// containerArg is the flag for the chosen video file, "" for none.
+func containerArg(c string) (string, error) {
+	switch c = strings.ToLower(strings.TrimSpace(c)); c {
+	case "":
+		return "", nil
+	case "mkv", "mp4":
+		return "-" + c, nil
+	}
+	return "", errors.New("the video file must be MKV or MP4")
 }
 
 // maxChannel covers 7.1 with room to spare; ffmpeg rejects what is not there.
@@ -79,6 +93,16 @@ func SubtitleArgs(o RunOptions) ([]string, error) {
 			args = append(args, f.flag)
 		}
 	}
+	// Only a run that writes a video file needs to say which.
+	if !o.SrtOnly {
+		c, err := containerArg(o.Container)
+		if err != nil {
+			return nil, err
+		}
+		if c != "" {
+			args = append(args, c)
+		}
+	}
 	if to := strings.ToLower(strings.TrimSpace(o.TranslateTo)); to != "" {
 		if !ValidLanguage(to) {
 			return nil, errors.New("translation language must be a 2- or 3-letter code such as de, fr or es")
@@ -113,16 +137,24 @@ func SplitArgs(track int) ([]string, error) {
 }
 
 // MergeArgs builds the full command of a merge: one video plus the extra
-// audio/subtitle files. -auto answers the CLI's "merge these?" with yes — the
-// user already said so by pressing Start on the Merge page.
-func MergeArgs(outDir, video string, extras []string) ([]string, error) {
+// audio/subtitle files, into an MKV or MP4 (container as in RunOptions).
+// -auto answers the CLI's "merge these?" with yes — the user already said so
+// by pressing Start on the Merge page.
+func MergeArgs(outDir, video string, extras []string, container string) ([]string, error) {
 	if video == "" {
 		return nil, errors.New("choose the video first")
 	}
 	if len(extras) == 0 {
 		return nil, errors.New("add at least one audio or subtitle file")
 	}
+	c, err := containerArg(container)
+	if err != nil {
+		return nil, err
+	}
 	args := append(append([]string{}, baseArgs...), "-auto")
+	if c != "" {
+		args = append(args, c)
+	}
 	if outDir != "" {
 		args = append(args, "-out:"+outDir)
 	}

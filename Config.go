@@ -64,6 +64,9 @@ type AppSettings struct {
 
 	// Speaker marking (-speakers)
 	speakerChangeThreshold float64 // share of looks that must agree on a change
+
+	// Output
+	container string // "mkv" or "mp4": the video file written (-mp4 / -mkv override it)
 }
 
 // AppConfig holds per-run flag state. Populated once in main, then passed by
@@ -79,6 +82,7 @@ type AppConfig struct {
 	badTargets    []string // -to: entries that are no language code
 	srtOnly       bool     // -srtonly: write only the .srt, no MKV
 	lean          bool     // -lean: drop foreign streams, keep video + chosen audio
+	container     string   // -mp4 / -mkv: the video file written, "" = as in the INI
 	noVad         bool     // -novad: disable the silence filter
 	lowMem        bool     // -lowmem: smaller compute type
 	auto          bool     // -auto: never ask, take every default answer
@@ -125,6 +129,7 @@ func defaultSettings() AppSettings {
 		subMinGapMs:            83,
 		subGapSplitMs:          500,
 		speakerChangeThreshold: 0.15,
+		container:              containerMKV,
 	}
 }
 
@@ -288,6 +293,8 @@ func applySetting(s *AppSettings, key, val string) {
 		s.subGapSplitMs = atoi(s.subGapSplitMs)
 	case "speaker_change_threshold":
 		s.speakerChangeThreshold = atof(s.speakerChangeThreshold)
+	case "container":
+		s.container = strings.ToLower(val)
 	}
 }
 
@@ -308,6 +315,8 @@ func settingsProblem(s AppSettings) string {
 		return "device must be cuda or cpu"
 	case s.surroundMode != "center_emphasis" && s.surroundMode != "pure_center":
 		return "surround_mode must be center_emphasis or pure_center"
+	case s.container != containerMKV && s.container != containerMP4:
+		return "container must be mkv or mp4"
 	case s.beamSize < 1 || s.beamSize > 10:
 		return "beam_size must be 1..10"
 	case s.vadThreshold < 0 || s.vadThreshold > 1:
@@ -458,6 +467,14 @@ sub_gap_split_ms=%d
 # changes (also false ones), higher only the sure ones. 0.15-0.3 measured
 # best (0.05..0.9 allowed).
 speaker_change_threshold=%.2f
+
+[output]
+# The video file a subtitled film or a merge becomes: mkv (keeps every track)
+# or mp4 (plays on more TVs, phones and browsers). A file with tracks an MP4
+# cannot hold (Blu-ray/DVD picture subtitles, ASS styling, fonts, TrueHD or
+# PCM audio) becomes an MKV anyway, and the reason is shown. -mp4 and -mkv
+# override this for one run.
+container=%s
 `,
 		d.detectSeconds, d.detectStartPercent, d.detectModel,
 		d.modelTranscribe, d.modelTranslate,
@@ -469,5 +486,6 @@ speaker_change_threshold=%.2f
 		d.subMaxCharsPerLine, d.subMaxLines, d.subMaxCPS,
 		d.subMinDurMs, d.subMaxDurMs, d.subMinGapMs, d.subGapSplitMs,
 		d.speakerChangeThreshold,
+		d.container,
 	)
 }

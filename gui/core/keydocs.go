@@ -233,6 +233,16 @@ var keyDocs = map[string]KeyDoc{
 		Advice: "0.15–0.3 (0.15 is the measured best). Raise it if “- ” lines appear where one person speaks; lower it if quick replies are missed.",
 		Kind:   "float", Min: f(0.05), Max: f(0.9), RecMin: f(0.15), RecMax: f(0.3),
 	},
+	// [output]
+	"container": {
+		Title:  "Video file: MKV or MP4",
+		Help:   "The file a subtitled film or a merge becomes when SuperSubtitler.exe is used on its own (drag and drop, command line). This window has its own choice on the Subtitle and Merge pages. MP4 plays on more TVs, phones and browsers; a file with tracks an MP4 cannot hold (Blu-ray/DVD picture subtitles, ASS styling, fonts, TrueHD or PCM audio) becomes an MKV anyway, and the reason is shown.",
+		Advice: "mkv keeps every track. mp4 if your player cannot open MKV.",
+		Kind:   "choice", Choices: []Choice{
+			{"mkv", "mkv — keeps every track (recommended)"},
+			{"mp4", "mp4 — plays on more devices"},
+		},
+	},
 }
 
 // DocFor returns the description of a key (nil for unknown keys).

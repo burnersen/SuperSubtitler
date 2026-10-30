@@ -28,6 +28,7 @@ WHAT IT DOES
     - a sidecar subtitle file:  Movie.<lang>.srt
     - a copy of the video with the subtitle track built in:
       Movie.subbed.mkv   (original streams are kept)
+      or with -mp4  Movie.subbed.mp4
   Audio-only files (mp3, m4a, wav, ...) produce just the .srt.
 
   Subtitles only appear while someone is actually speaking
@@ -41,7 +42,7 @@ LANGUAGE
 
 QUICK START
   Just drag files or a folder onto the EXE. Already-finished
-  files (an existing .srt or .subbed.mkv) are skipped, so
+  files (an existing .srt or .subbed.mkv/.mp4) are skipped, so
   running again is safe (-force redoes them).
 
   All questions (which audio tracks, which language when the
@@ -62,16 +63,25 @@ OPTIONS
                    auto-selecting.
   -channel:N       Use physical channel N (0-based) of the
                    chosen track (e.g. to isolate the center).
-  -srtonly         Write only the .srt, do not build an MKV.
-  -lean            In the MKV keep only video + the chosen
-                   audio + the new subtitle (drop other streams).
+  -srtonly         Write only the .srt, no video file.
+  -mp4             Write an MP4 instead of an MKV (plays on
+                   more TVs, phones and browsers). A file with
+                   tracks an MP4 cannot hold (Blu-ray/DVD
+                   picture subtitles, ASS styling, fonts,
+                   TrueHD or PCM audio) becomes an MKV anyway,
+                   and you are told why. Also for merges.
+  -mkv             Write an MKV (the default). Overrides
+                   container=mp4 from the INI for one run.
+  -lean            In the video file keep only video + the
+                   chosen audio + the new subtitle (drop other
+                   streams). Often lets a Blu-ray rip fit -mp4.
   -novad           Turn off the silence filter (transcribe
                    everything, including pauses).
   -lowmem          Use a smaller compute type (less video
                    memory, a bit slower).
   -to:XX           Also write the subtitles in language XX
                    (e.g. -to:de, -to:de,fr): own track in the
-                   MKV (the default one) and own .srt, same
+                   video (the default one) and own .srt, same
                    timing. Loads the translation model (3 GB)
                    the first time; quick on an NVIDIA card,
                    very slow on the processor alone.
@@ -87,7 +97,7 @@ OPTIONS
                    merge = yes.
   -force           Redo files that already have subtitles
                    (the old results are overwritten).
-  -out:FOLDER      Write the .srt/.mkv results into FOLDER
+  -out:FOLDER      Write the .srt/.mkv/.mp4 results into FOLDER
                    instead of next to the source file.
   -nowait          Do not wait for Enter at the end.
   -setup           Download and install everything (including
@@ -104,14 +114,15 @@ OPTIONS
 
 SUPPORTED FORMATS
   Video -> .subbed.mkv :  mkv, mp4, mov, m4v, avi, ts, m2ts,
-                          webm, mpg, wmv, flv, 3gp
+  (.mp4 with -mp4)        webm, mpg, wmv, flv, 3gp
   Audio -> .srt only   :  m4a, mp3, wav, flac, aac, ogg,
                           opus, m4b
 
 MERGE (automatic)
   Drop ONE video together with one or more audio and/or
   subtitle files and SuperSubtitler offers to mux them into
-  "<video>.joined.mkv" (lossless stream copy, no re-encode):
+  "<video>.joined.mkv" (lossless stream copy, no re-encode;
+  "<video>.joined.mp4" with -mp4):
     - Audio: the dropped audio file(s). If none are dropped,
       the video keeps its own audio (never silent).
     - Subtitles: the dropped subtitle file(s). If none, the

@@ -32,7 +32,7 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 
 1. Download `SuperSubtitler.exe`, a single file with nothing to install — and, if you prefer a window, `SuperSubtitlerGUI.exe` into the same folder.
 2. Drag a video or audio file (or a whole folder) onto it.
-3. Done. You get a `Movie.<lang>.srt` next to it **and** a `Movie.subbed.mkv` with the subtitle track built in.
+3. Done. You get a `Movie.<lang>.srt` next to it **and** a `Movie.subbed.mkv` with the subtitle track built in (or a `Movie.subbed.mp4` with `-mp4`).
 
 On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a self-contained Python, the faster-whisper engine and the speech models — no installs, no PATH fiddling, no Python knowledge needed. Every download shows its progress (MB, speed); `-setup` does all of it in one go without processing a file. After that, everything runs offline and locally; your audio never leaves your machine.
 
@@ -46,6 +46,7 @@ On first run SuperSubtitler sets itself up automatically: it downloads FFmpeg, a
 - ⚡ **GPU-fast, CPU-safe.** Runs on your NVIDIA GPU via auto-installed CUDA libraries (a 1h45 film in ~80 seconds on a modern card), and falls back to the CPU automatically if there's no GPU. Without an NVIDIA card it notices that up front: the 1.3 GB of CUDA libraries are not even downloaded.
 - 🗨️ **Who is speaking?** With `-speakers` a new subtitle starts when the speaking voice changes, and a quick exchange shares one subtitle as `- ` lines, the way professional subtitles show dialogue. It looks only for the *moment* the voice changes (pyannote segmentation 3.0, which judges every second about nine times) — that is what subtitles need, and it is far better at quick replies than telling voices apart across the whole film. Measured on hand-labelled debates and news (VoxConverse, 1–11 speakers) and checked by CI on every change: 74 % of all changes and 59 % of the quick ones found, 73 % of the found ones real; a 2-hour film takes about 2 minutes on the processor, while the GPU already works on the next file. Not perfect — quick replies are the hardest case for any system — and if it ever fails, you still get the subtitle, just without the marks.
 - 🎚️ **Multi-track aware.** A file with several audio tracks (e.g. German TrueHD, German AC3, English DTS, a commentary) is listened to track by track first, and the **best-understood track of every language** is suggested — measured by how sure the speech model is of what it hears, with commentaries and audio descriptions left out. You confirm or change the choice; each track becomes its own language-tagged subtitle track in one MKV.
+- 📦 **MKV or MP4.** MKV by default (keeps every track); `-mp4` (or `container=mp4` in the INI, or the choice in the window) writes an MP4 that plays on more TVs, phones and browsers. If a file has tracks an MP4 cannot hold — Blu-ray/DVD picture subtitles, ASS styling, fonts, TrueHD or PCM audio — it becomes an MKV anyway and you are told exactly why. Nothing is ever dropped behind your back.
 - 🧩 **Merge mode.** Drop one video together with extra audio and/or subtitle files and it offers to mux them into one `.joined.mkv` (lossless copy). The result is never silent — if you don't add audio, the video keeps its own.
 - 📐 **Subtitles built right.** Word-level timing, two-line wrapping, sensible characters-per-second, minimum/maximum duration and anti-flicker gaps — close to professional (Netflix/BBC) guidelines.
 - 🧹 **SRT cleaner.** A plain-text term list strips ads and hallucinated junk lines (you control every term; nothing is hard-coded).
@@ -99,16 +100,18 @@ Drag files or folders onto the EXE, or pass them as arguments. Flags and files m
 | `-lang:XX` | Force the source language (ISO code, e.g. `-lang:de`); skip detection |
 | `-track:N` | Use audio track N (1-based) instead of asking/auto-selecting |
 | `-channel:N` | Isolate physical channel N (0-based) of the chosen track |
-| `-srtonly` | Write only the `.srt`, no MKV |
-| `-lean` | In the MKV keep only video + the subtitled audio + the new subtitles |
+| `-srtonly` | Write only the `.srt`, no video file |
+| `-mp4` | Write an MP4 instead of an MKV (also for merges); falls back to MKV, with the reason, when a track does not fit |
+| `-mkv` | Write an MKV (the default; overrides `container=mp4` from the INI for one run) |
+| `-lean` | In the video file keep only video + the subtitled audio + the new subtitles (often lets a Blu-ray rip fit `-mp4`) |
 | `-novad` | Disable the silence filter (transcribe everything, pauses included) |
 | `-lowmem` | Smaller compute type (less video memory, a bit slower) |
-| `-to:XX` | Also write the subtitles in language XX (`-to:de`, `-to:de,fr` …): own MKV track (the default one) and `.srt` |
+| `-to:XX` | Also write the subtitles in language XX (`-to:de`, `-to:de,fr` …): own subtitle track (the default one) and `.srt` |
 | `-speakers` | Mark speaker changes: a new subtitle per voice, `- ` lines for quick exchanges |
 | `-split` | Export each audio channel as a WAV to find the speech; skip transcription |
 | `-auto` | Never ask: the best audio track of every language, the detected language, merge = yes |
 | `-force` | Redo files that already have subtitles (overwrites the old results) |
-| `-out:FOLDER` | Write the `.srt`/`.mkv` results into FOLDER instead of next to the source |
+| `-out:FOLDER` | Write the `.srt`/`.mkv`/`.mp4` results into FOLDER instead of next to the source |
 | `-nowait` | Don't wait for Enter at the end (for scripts and shortcuts) |
 | `-setup` | Download and install everything, speech models included, then exit |
 | `-nomerge` | Never offer the merge mode; subtitle every dropped file |
@@ -116,13 +119,13 @@ Drag files or folders onto the EXE, or pass them as arguments. Flags and files m
 | `-version` | Print the version and exit |
 | `-help` | Show the banner and full options list |
 
-**Supported input** — Video → `.subbed.mkv`: `mkv mp4 mov m4v avi ts m2ts webm mpg wmv flv 3gp` · Audio → `.srt` only: `m4a mp3 wav flac aac ogg opus m4b`
+**Supported input** — Video → `.subbed.mkv` (`.subbed.mp4` with `-mp4`): `mkv mp4 mov m4v avi ts m2ts webm mpg wmv flv 3gp` · Audio → `.srt` only: `m4a mp3 wav flac aac ogg opus m4b`
 
 ---
 
 ## 🧩 Merge mode
 
-Drop **one** video together with one or more audio and/or subtitle files, and SuperSubtitler offers to mux them into `<video>.joined.mkv` — losslessly, no re-encode:
+Drop **one** video together with one or more audio and/or subtitle files, and SuperSubtitler offers to mux them into `<video>.joined.mkv` (with `-mp4`: `<video>.joined.mp4`) — losslessly, no re-encode:
 
 - **Audio:** the dropped audio file(s). If you don't drop any, the video keeps its own audio (the result is **never** silent).
 - **Subtitles:** the dropped subtitle file(s). If you don't drop any, the video keeps its own.
@@ -134,7 +137,7 @@ Drop **one** video together with one or more audio and/or subtitle files, and Su
 
 Two plain-text files are created next to the EXE on first run:
 
-- **`SuperSubtitler_Config.ini`** — models, the silence-filter settings, lead-in, surround handling, all subtitle formatting limits (chars per line, CPS, min/max duration, …) and how sure a speaker change must be. Invalid values reset the file to its documented defaults.
+- **`SuperSubtitler_Config.ini`** — models, the silence-filter settings, lead-in, surround handling, all subtitle formatting limits (chars per line, CPS, min/max duration, …), how sure a speaker change must be and the video file to write (`container=mkv` or `mp4`). Invalid values reset the file to its documented defaults.
 - **`SuperSubtitler_SRTCleaner.txt`** — one term per line to delete from results (ads, junk). A line starting with `=` only matches when the whole subtitle equals it exactly. Nothing is hard-coded; you decide every term.
 
 ---

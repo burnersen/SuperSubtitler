@@ -22,12 +22,12 @@ func TestKindOfAndOwnOutput(t *testing.T) {
 			t.Errorf("KindOf(%q) = %q", in, got)
 		}
 	}
-	for _, p := range []string{"M.subbed.mkv", "M.joined.mkv", "M.JOINED.3.mkv"} {
+	for _, p := range []string{"M.subbed.mkv", "M.joined.mkv", "M.JOINED.3.mkv", "M.subbed.mp4", "M.joined.mp4", "M.joined.2.MP4"} {
 		if !IsOwnOutput(p) {
 			t.Errorf("%q should be own output", p)
 		}
 	}
-	for _, p := range []string{"M.mkv", "M.joined.x.mkv", "M.joined.mp4"} {
+	for _, p := range []string{"M.mkv", "M.joined.x.mkv", "M.mp4", "M.subbed.avi", "M.joined.mov"} {
 		if IsOwnOutput(p) {
 			t.Errorf("%q is not own output", p)
 		}
@@ -76,6 +76,15 @@ func TestSubtitleArgs(t *testing.T) {
 	if _, err := SubtitleArgs(RunOptions{Language: "german"}); err == nil {
 		t.Error("a language name must be refused, only codes are passed on")
 	}
+	if mp4, _ := SubtitleArgs(RunOptions{Container: "MP4"}); mp4[len(mp4)-1] != "-mp4" {
+		t.Errorf("container mp4 = %q", mp4)
+	}
+	if srt, _ := SubtitleArgs(RunOptions{Container: "mp4", SrtOnly: true}); srt[len(srt)-1] != "-srtonly" {
+		t.Errorf("a subtitle file only run writes no video, so no container: %q", srt)
+	}
+	if _, err := SubtitleArgs(RunOptions{Container: "avi"}); err == nil {
+		t.Error("container avi must be refused")
+	}
 	plain, _ := SubtitleArgs(RunOptions{})
 	if !reflect.DeepEqual(plain, []string{"-json", "-nowait", "-nomerge"}) {
 		t.Errorf("default args = %q", plain)
@@ -108,15 +117,22 @@ func TestChannelAndSplitArgs(t *testing.T) {
 }
 
 func TestMergeAndSetupArgs(t *testing.T) {
-	if _, err := MergeArgs("", "", []string{"a.m4a"}); err == nil {
+	if _, err := MergeArgs("", "", []string{"a.m4a"}, ""); err == nil {
 		t.Error("merge without a video must be refused")
 	}
-	if _, err := MergeArgs("", "v.mkv", nil); err == nil {
+	if _, err := MergeArgs("", "v.mkv", nil, ""); err == nil {
 		t.Error("merge without extras must be refused")
 	}
-	args, _ := MergeArgs("out", "v.mkv", []string{"a.m4a", "s.srt"})
+	args, _ := MergeArgs("out", "v.mkv", []string{"a.m4a", "s.srt"}, "")
 	if !reflect.DeepEqual(args, []string{"-json", "-nowait", "-auto", "-out:out", "v.mkv", "a.m4a", "s.srt"}) {
 		t.Errorf("merge args = %q", args)
+	}
+	args, _ = MergeArgs("", "v.mkv", []string{"s.srt"}, "mp4")
+	if !reflect.DeepEqual(args, []string{"-json", "-nowait", "-auto", "-mp4", "v.mkv", "s.srt"}) {
+		t.Errorf("mp4 merge args = %q", args)
+	}
+	if _, err := MergeArgs("", "v.mkv", []string{"s.srt"}, "webm"); err == nil {
+		t.Error("container webm must be refused")
 	}
 	if got := SetupArgs(true); !reflect.DeepEqual(got, []string{"-json", "-nowait", "-setup", "-translate"}) {
 		t.Errorf("setup args = %q", got)

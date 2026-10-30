@@ -99,7 +99,7 @@ func TestQuestionsFallBackWhenStdinCloses(t *testing.T) {
 			if got := promptForLanguage("M.mkv"); got != "" {
 				t.Errorf("closed stdin should let the engine guess, got %q", got)
 			}
-			if !askMerge("v.mkv", []string{"a.m4a"}, nil, false) {
+			if !askMerge("v.mkv", []string{"a.m4a"}, nil, false, containerMKV) {
 				t.Error("closed stdin should merge (default yes)")
 			}
 		})
@@ -126,7 +126,7 @@ func TestAutoNeverAsks(t *testing.T) {
 			if got := promptTrackSelection(testCands(), "M.mkv", true); len(got) != 2 {
 				t.Errorf("-auto should take the suggested tracks (one per language: both), got %v", got)
 			}
-			if !askMerge("v.mkv", nil, []string{"s.srt"}, true) {
+			if !askMerge("v.mkv", nil, []string{"s.srt"}, true, containerMP4) {
 				t.Error("-auto should merge")
 			}
 		})

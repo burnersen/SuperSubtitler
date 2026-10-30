@@ -25,7 +25,7 @@ import (
 
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
-const appVersion = "0.4.1"
+const appVersion = "0.4.2"
 
 // pterm prefix printers, shared across the package.
 var (
@@ -171,7 +171,7 @@ func run() (code int) {
 	// Merging needs FFmpeg only, so it never waits for the Python setup.
 	if !cfg.split && !cfg.noMerge {
 		if video, audios, subs, ok := classifyMergeInputs(cfg.inputArgs); ok {
-			if askMerge(video, audios, subs, cfg.auto) {
+			if askMerge(video, audios, subs, cfg.auto, outputContainer(cfg)) {
 				emitRun("merge", 1, cfg)
 				if err := initTools(ctx, cfg, false); err != nil {
 					return fatal("merge", err)
@@ -283,13 +283,14 @@ func printQuickTips() {
 	g := pterm.Gray
 	tips := y("• drag video/audio files or a folder onto the EXE") + "\n" +
 		y("• drop 1 video + audio/subtitle files") + g("   >>  ") + "merge into one .joined.mkv\n" +
+		y("• -mp4 <files>      ") + g("        >>  ") + "MP4 instead of MKV (plays on more TVs and phones)\n" +
 		y("• -translate <files>") + g("        >>  ") + "translate everything to English\n" +
 		y("• -lang:de <files>  ") + g("        >>  ") + "force the source language (skip detection)\n" +
 		y("• -track:N  /  -channel:N") + g("   >>  ") + "pick a specific audio track / channel\n" +
 		y("• -split <files>    ") + g("        >>  ") + "export each audio channel as WAV (find the speech)\n" +
 		y("• -auto  /  -force  ") + g("        >>  ") + "never ask / redo files that already have subtitles\n" +
 		y("• -out:<folder>     ") + g("        >>  ") + "write the results into another folder\n" +
-		y("• -srtonly · -lean · -lowmem · -novad") + g("   >>  ") + "see -help for all options\n\n" +
+		y("• -srtonly · -lean · -mkv · -lowmem · -novad") + g("   >>  ") + "see -help for all options\n\n" +
 		g("  language codes: de en es fr it pt nl ru pl tr ja ko zh ar …  (any ISO code)")
 	pterm.DefaultBox.WithTitle(pterm.LightCyan("  Quick start  ")).WithTitleTopCenter().Println(tips)
 	pterm.Println()
@@ -311,8 +312,10 @@ func printUsage() {
 		{pterm.LightCyan("-translate"), "Translate every track to English (uses the large model)."},
 		{pterm.LightCyan("-track:N"), "Use audio track N (1-based) instead of auto-selecting."},
 		{pterm.LightCyan("-channel:N"), "Use physical channel N (0-based) of the chosen track."},
-		{pterm.LightCyan("-srtonly"), "Write only the .srt sidecar, no MKV."},
-		{pterm.LightCyan("-lean"), "MKV keeps only video + chosen audio + the subtitle track."},
+		{pterm.LightCyan("-srtonly"), "Write only the .srt sidecar, no video file."},
+		{pterm.LightCyan("-mp4"), "Write an MP4 instead of an MKV (falls back to MKV, with the reason, when a track does not fit)."},
+		{pterm.LightCyan("-mkv"), "Write an MKV (the default; overrides container=mp4 from the INI)."},
+		{pterm.LightCyan("-lean"), "The video file keeps only video + chosen audio + the subtitle track."},
 		{pterm.LightCyan("-novad"), "Disable the voice-activity (silence) filter."},
 		{pterm.LightCyan("-lowmem"), "Smaller compute type (less VRAM, slightly slower)."},
 		{pterm.LightCyan("-to:XX"), "Also write the subtitles in language XX (e.g. -to:de, -to:de,fr): own track and .srt."},
@@ -320,7 +323,7 @@ func printUsage() {
 		{pterm.LightCyan("-split"), "Export each audio channel as a WAV (to find the speech); skip transcription."},
 		{pterm.LightCyan("-auto"), "Never ask: all tracks, detected language, merge = yes."},
 		{pterm.LightCyan("-force"), "Redo files that already have subtitles (overwrites the results)."},
-		{pterm.LightCyan("-out:DIR"), "Write .srt/.mkv results into DIR instead of next to the source."},
+		{pterm.LightCyan("-out:DIR"), "Write .srt/.mkv/.mp4 results into DIR instead of next to the source."},
 		{pterm.LightCyan("-nowait"), "Do not wait for Enter at the end."},
 		{pterm.LightCyan("-setup"), "Download and install everything (incl. speech models), then exit."},
 		{pterm.LightCyan("-nomerge"), "Never offer the merge mode; subtitle every dropped file."},
@@ -332,8 +335,8 @@ func printUsage() {
 	pterm.Println()
 
 	head("Supported formats")
-	pterm.Println(pterm.Gray("  Video → .subbed.mkv:  mkv, mp4, mov, m4v, avi, ts, m2ts, webm, mpg, wmv, flv, 3gp"))
-	pterm.Println(pterm.Gray("  Audio → .srt only:    m4a, mp3, wav, flac, aac, ogg, opus, m4b"))
+	pterm.Println(pterm.Gray("  Video → .subbed.mkv (or .mp4):  mkv, mp4, mov, m4v, avi, ts, m2ts, webm, mpg, wmv, flv, 3gp"))
+	pterm.Println(pterm.Gray("  Audio → .srt only:               m4a, mp3, wav, flac, aac, ogg, opus, m4b"))
 }
 
 // parseProgress extracts the fraction from an "@PROGRESS 0.42" line emitted by
@@ -505,6 +508,10 @@ func parseArgs(argv []string) *AppConfig {
 			cfg.srtOnly = true
 		case low == "-lean":
 			cfg.lean = true
+		case low == "-mp4":
+			cfg.container = containerMP4
+		case low == "-mkv":
+			cfg.container = containerMKV
 		case low == "-novad":
 			cfg.noVad = true
 		case low == "-lowmem":
@@ -620,15 +627,19 @@ func collectInputFiles(cfg *AppConfig, args []string) ([]string, []skippedInput)
 	return files, skipped
 }
 
-// isOwnOutput reports files this tool wrote itself (.subbed.mkv, .joined.mkv),
-// which must never be fed back in as input.
+// isOwnOutput reports files this tool wrote itself (.subbed.mkv/.mp4,
+// .joined.mkv/.mp4), which must never be fed back in as input.
 func isOwnOutput(path string) bool {
 	low := strings.ToLower(filepath.Base(path))
-	if strings.HasSuffix(low, ".subbed.mkv") {
+	ext := filepath.Ext(low)
+	if ext != ".mkv" && ext != ".mp4" {
+		return false
+	}
+	stem := strings.TrimSuffix(low, ext)
+	if strings.HasSuffix(stem, ".subbed") {
 		return true
 	}
 	// "<name>.joined.mkv" or numbered "<name>.joined.2.mkv"
-	stem := strings.TrimSuffix(low, ".mkv")
 	if i := strings.LastIndex(stem, ".joined"); i >= 0 {
 		rest := stem[i+len(".joined"):]
 		if rest == "" {
@@ -653,10 +664,10 @@ func outputBase(cfg *AppConfig, src string) string {
 	return filepath.Join(cfg.outDir, filepath.Base(stem))
 }
 
-// hasExistingSubs reports whether a sidecar .srt or a .subbed.mkv already exists
-// for this output stem, so a re-scan skips finished work.
+// hasExistingSubs reports whether a sidecar .srt or a .subbed.mkv/.mp4 already
+// exists for this output stem, so a re-scan skips finished work.
 func hasExistingSubs(base string) bool {
-	if fileExists(base + ".subbed.mkv") {
+	if fileExists(base+".subbed.mkv") || fileExists(base+".subbed.mp4") {
 		return true
 	}
 	if m, _ := filepath.Glob(globEscape(base) + ".*.srt"); len(m) > 0 {
@@ -696,6 +707,7 @@ type fileJob struct {
 
 	status  string // "ok" | "error" | "skipped"
 	outPath string
+	note    string // -mp4 became an MKV: why (shown with the result)
 	err     error
 }
 
@@ -1208,12 +1220,16 @@ func finalizeStage(ctx context.Context, cfg *AppConfig, job *fileJob) {
 		job.status = "ok"
 		return
 	}
-	job.outPath = base + ".subbed.mkv"
 	emitStage(job.index+1, 0, "mux")
-	if err := buildMKV(ctx, cfg, job.src, subs, audioOrdinals, job.outPath); err != nil {
+	out, note, err := buildSubbed(ctx, cfg, job.src, subs, audioOrdinals, base)
+	if err != nil {
 		job.fail(err)
 		return
 	}
+	if note != "" {
+		pWarn.Println(job.label() + " — " + note + ".")
+	}
+	job.outPath, job.note = out, note
 	job.status = "ok"
 }
 
@@ -1299,7 +1315,11 @@ func printSummary(results []*fileJob, cancelled bool) (ok, fail int) {
 	}
 	for _, r := range results {
 		if r.status == "ok" {
-			pterm.Println(pterm.Green("  OK  ") + baseName(r.src))
+			line := pterm.Green("  OK  ") + baseName(r.src)
+			if r.note != "" {
+				line += pterm.Yellow("  —  " + r.note)
+			}
+			pterm.Println(line)
 		} else if r.err != nil {
 			pterm.Println(pterm.Red("  ERR ") + baseName(r.src) + pterm.Gray("  —  "+shortErr(r.err)))
 		}
