@@ -326,6 +326,7 @@ func emitResult(job *fileJob) {
 		if job.outPath != "" {
 			ev.Outputs = append(ev.Outputs, job.outPath)
 		}
+		ev.Message = job.note // -mp4 became an MKV: why
 	} else {
 		ev.Status = "failed"
 		if job.err != nil {

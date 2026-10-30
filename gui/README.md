@@ -34,11 +34,15 @@ Every decision about a file (language, timing, layout) stays in the CLI.
 - 📊 **Live progress** — per file: stage, language, percent, time left; overall
   progress in the window title and on the **taskbar button**, which flashes
   when the batch is done.
-- 🧩 **Merge page** — one video plus audio/subtitle files → `.joined.mkv`,
-  lossless.
+- 🧩 **Merge page** — one video plus audio/subtitle files → `.joined.mkv`
+  or `.joined.mp4`, lossless.
+- 📦 **MKV or MP4** — choose the video file on the Subtitle and Merge pages.
+  MP4 plays on more TVs and phones; a file with tracks an MP4 cannot hold
+  (Blu-ray/DVD subtitles, ASS styling, fonts, TrueHD or PCM sound) becomes
+  an MKV anyway, and the file list says why.
 - 🔤 **Also as subtitles in** — pick a language on the Subtitle page (`-to:XX`):
   a second subtitle track and `.srt` in that language, same timing, the
-  default track in the MKV. Translated locally (MADLAD-400, 3 GB one-time).
+  default track in the video file. Translated locally (MADLAD-400, 3 GB one-time).
 - 🗨️ **Mark speaker changes** — tick it on the Subtitle page (`-speakers`): a
   new subtitle starts when the voice changes, quick exchanges share one as
   `- ` lines. Each file shows how many speaker changes were found; how sure a

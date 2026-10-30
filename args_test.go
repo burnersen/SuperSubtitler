@@ -62,8 +62,10 @@ func TestParseTrackChoice(t *testing.T) {
 }
 
 func TestIsOwnOutput(t *testing.T) {
-	yes := []string{`C:\a\Movie.subbed.mkv`, `Movie.JOINED.mkv`, `Movie.joined.2.mkv`}
-	no := []string{`Movie.mkv`, `Movie.joined.x.mkv`, `joined.mp4`, `Movie.joinedcut.mkv`}
+	yes := []string{`C:\a\Movie.subbed.mkv`, `Movie.JOINED.mkv`, `Movie.joined.2.mkv`,
+		`C:\a\Movie.subbed.mp4`, `Movie.Joined.mp4`, `Movie.joined.3.mp4`}
+	no := []string{`Movie.mkv`, `Movie.joined.x.mkv`, `joined.mp4`, `Movie.joinedcut.mkv`,
+		`Movie.mp4`, `Movie.subbed.avi`, `Movie.joined.mov`}
 	for _, p := range yes {
 		if !isOwnOutput(p) {
 			t.Errorf("isOwnOutput(%q) = false", p)

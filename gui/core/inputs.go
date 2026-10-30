@@ -60,15 +60,17 @@ func KindOf(path string) Kind {
 }
 
 // IsOwnOutput reports files SuperSubtitler wrote itself (.subbed.mkv,
-// .joined.mkv, .joined.N.mkv); the CLI never takes them as input either.
+// .joined.mkv, .joined.N.mkv, each also as .mp4); the CLI never takes them
+// as input either.
 func IsOwnOutput(path string) bool {
 	low := strings.ToLower(filepath.Base(path))
-	if strings.HasSuffix(low, ".subbed.mkv") {
-		return true
-	}
-	stem := strings.TrimSuffix(low, ".mkv")
-	if stem == low {
+	ext := filepath.Ext(low)
+	if ext != ".mkv" && ext != ".mp4" {
 		return false
+	}
+	stem := strings.TrimSuffix(low, ext)
+	if strings.HasSuffix(stem, ".subbed") {
+		return true
 	}
 	if i := strings.LastIndex(stem, ".joined"); i >= 0 {
 		rest := stem[i+len(".joined"):]

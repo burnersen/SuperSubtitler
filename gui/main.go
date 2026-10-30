@@ -13,6 +13,7 @@ package main
 
 import (
 	"embed"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -24,7 +25,7 @@ import (
 var assets embed.FS
 
 // guiVersion is the one place the window's version is written.
-const guiVersion = "0.4.1"
+const guiVersion = "0.4.2"
 
 // singleInstanceID must never change, or a new build would not find an old
 // window that is already open.
@@ -38,6 +39,8 @@ func startBackground(theme string) *options.RGBA {
 }
 
 func main() {
+	// After an update: let the old window close first (see update.go).
+	waitForPreviousWindow(os.Args[1:])
 	// Without a console of its own there is no clean stop (see wincon.go).
 	setupHiddenConsole()
 

@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -111,13 +112,41 @@ func replaceSelf(rel core.Release, sums map[string]string) error {
 	return nil
 }
 
-// restartSelf starts the window again a moment after this one has closed (the
-// single-instance lock would otherwise hand the new start back to this one).
+// afterUpdateFlag tells a restarted window which process it replaces.
+const afterUpdateFlag = "--after-update="
+
+// restartSelf starts the new window directly, no shell in between: the cmd
+// and ping of earlier versions flashed a console window on every update
+// (DETACHED_PROCESS left ping without a console, so Windows opened one).
+// The new window waits for this one to be gone (waitForPreviousWindow), as
+// the single-instance lock would otherwise hand the start back to this one.
 func restartSelf() error {
-	cmd := exec.Command("cmd.exe", "/C", "ping -n 3 127.0.0.1 >NUL & start \"\" \""+selfPath()+"\"")
+	cmd := exec.Command(selfPath(), afterUpdateFlag+strconv.Itoa(os.Getpid()))
 	cmd.Dir = guiDir()
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW | windows.DETACHED_PROCESS}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS}
 	return cmd.Start()
+}
+
+// waitForPreviousWindow lets a window started by restartSelf wait until the
+// old one has closed (at most 15 s; it normally takes well under one).
+func waitForPreviousWindow(args []string) {
+	for _, a := range args {
+		v, ok := strings.CutPrefix(a, afterUpdateFlag)
+		if !ok {
+			continue
+		}
+		pid, err := strconv.Atoi(v)
+		if err != nil || pid <= 0 {
+			return
+		}
+		h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
+		if err != nil {
+			return // already gone
+		}
+		defer windows.CloseHandle(h)
+		_, _ = windows.WaitForSingleObject(h, 15000)
+		return
+	}
 }
 
 // cleanupAfterUpdate deletes the previous window's exe; it tells whether one

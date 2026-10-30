@@ -134,12 +134,17 @@ func (a *App) UpdateAll() (UpdateResult, error) {
 // what is installed here, else "".
 func (a *App) CheckUpdate() (string, error) { return checkUpdate() }
 
-// RestartForUpdate closes the window and starts the new one.
+// RestartForUpdate closes the window and starts the new one. The window is
+// closed only after this call has answered: quitting inside it can cut the
+// answer off, which the page then shows as an error.
 func (a *App) RestartForUpdate() error {
 	if err := restartSelf(); err != nil {
 		return fmt.Errorf("could not start the new window — please start it yourself: %w", err)
 	}
-	wailsruntime.Quit(a.ctx)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		wailsruntime.Quit(a.ctx)
+	}()
 	return nil
 }
 
@@ -285,11 +290,11 @@ func (a *App) StartSplit(track int, files []string) error {
 		RunState{Kind: "split", Batch: 1, Batches: len(batches)})
 }
 
-func (a *App) StartMerge(outDir, video string, extras []string) error {
+func (a *App) StartMerge(outDir, video string, extras []string, container string) error {
 	if err := a.readyCLI(); err != nil {
 		return err
 	}
-	args, err := core.MergeArgs(outDir, video, extras)
+	args, err := core.MergeArgs(outDir, video, extras, container)
 	if err != nil {
 		return err
 	}

@@ -183,7 +183,7 @@
     transcribe: "Transcribing",
     speakers: "Finding speaker changes",
     translate: "Translating",
-    mux: "Building the MKV"
+    mux: "Building the video file"
   };
 
   function stageText(stage) {

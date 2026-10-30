@@ -290,15 +290,22 @@ a.link:hover { text-decoration: underline; }
           <label class="field"><span>Also as subtitles in</span>
             <select id="opt-to"></select>
             <input type="text" id="opt-to-other" maxlength="3" placeholder="code, e.g. ca" hidden />
-            <small class="hint">A second subtitle track in that language, same timing, chosen as the default in the MKV. One-time download of the translation model (3 GB). Quick on an NVIDIA card, very slow on the processor alone.</small>
+            <small class="hint">A second subtitle track in that language, same timing, chosen as the default in the video file. One-time download of the translation model (3 GB). Quick on an NVIDIA card, very slow on the processor alone.</small>
           </label>
           <label class="opt"><input type="checkbox" id="opt-speakers" />
             <span>Mark speaker changes<small>A new subtitle when the voice changes; quick exchanges share one as “- ” lines. Takes a little longer (runs on the processor).</small></span></label>
           <hr class="sep" />
           <label class="opt"><input type="checkbox" id="opt-srtonly" />
-            <span>Subtitle file only<small>Write just the .srt, no MKV copy of the video.</small></span></label>
+            <span>Subtitle file only<small>Write just the .srt, no copy of the video.</small></span></label>
+          <label class="field"><span>Video file</span>
+            <select id="opt-container">
+              <option value="mkv">MKV, keeps every track (recommended)</option>
+              <option value="mp4">MP4, plays on more TVs and phones</option>
+            </select>
+            <small class="hint">A file with tracks an MP4 cannot hold (Blu-ray or DVD subtitles, styled ASS subtitles, fonts, TrueHD or PCM sound) becomes an MKV anyway; the list says why.</small>
+          </label>
           <label class="opt"><input type="checkbox" id="opt-lean" />
-            <span>Lean MKV<small>Keep only the picture, the subtitled audio and the new subtitles.</small></span></label>
+            <span>Lean video file<small>Keep only the picture, the subtitled audio and the new subtitles. Often lets a Blu-ray rip fit into an MP4.</small></span></label>
           <label class="opt"><input type="checkbox" id="opt-vad" checked />
             <span>Silence filter<small>No subtitles during pauses. Turn off only if speech gets lost.</small></span></label>
           <label class="opt"><input type="checkbox" id="opt-lowmem" />
@@ -345,13 +352,20 @@ a.link:hover { text-decoration: underline; }
     <section class="page" id="page-merge">
       <div>
         <h1>Merge</h1>
-        <p class="lead">One video plus audio and/or subtitle files → one <code>.joined.mkv</code> next to the video. Lossless: nothing is re-encoded.
+        <p class="lead">One video plus audio and/or subtitle files → one <code>.joined.mkv</code> or <code>.joined.mp4</code> next to the video. Lossless: nothing is re-encoded.
           Without an audio file the video keeps its own sound; tracks are language-tagged from names like <code>Movie.de.srt</code>.</p>
       </div>
       <div class="panel files" style="min-height: 260px">
         <div class="files-head">
           <h2 id="merge-count">Files</h2>
           <div class="row-actions">
+            <label class="field" style="display:flex;gap:8px;align-items:center;margin:0">
+              <span style="color:var(--muted);font-size:12.5px;white-space:nowrap">Video file</span>
+              <select id="merge-container" title="MP4 plays on more devices; tracks it cannot hold make it an MKV anyway">
+                <option value="mkv">MKV</option>
+                <option value="mp4">MP4</option>
+              </select>
+            </label>
             <button class="btn small" id="merge-add-files">Add files</button>
             <button class="btn small" id="merge-clear">Clear</button>
           </div>
@@ -754,7 +768,7 @@ function renderSubList() {
   $("sub-count").textContent = state.subItems.length ? "Files (" + state.subItems.length + ")" : "Files";
   if (state.subItems.length === 0) {
     box.innerHTML = '<div class="empty"><b>Drop videos, audio files or whole folders here</b>' +
-      "Video → <code>Movie.&lt;lang&gt;.srt</code> + <code>Movie.subbed.mkv</code> · Audio → <code>.srt</code></div>";
+      "Video → <code>Movie.&lt;lang&gt;.srt</code> + <code>Movie.subbed.mkv</code> (or <code>.mp4</code>) · Audio → <code>.srt</code></div>";
     return;
   }
   box.innerHTML = state.subItems.map((it) => itemHtml(it, "subtitle")).join("");
@@ -837,7 +851,7 @@ const optionIds = ["opt-translate", "opt-speakers", "opt-srtonly", "opt-lean", "
 let outDir = "";
 
 function saveOptions() {
-  const o = { lang: $("opt-lang").value, other: $("opt-lang-other").value, outmode: $("opt-outmode").value, outDir, channel: $("opt-channel").value, to: $("opt-to").value, toOther: $("opt-to-other").value };
+  const o = { lang: $("opt-lang").value, other: $("opt-lang-other").value, outmode: $("opt-outmode").value, outDir, channel: $("opt-channel").value, to: $("opt-to").value, toOther: $("opt-to-other").value, container: $("opt-container").value };
   optionIds.forEach((id) => { o[id] = $(id).checked; });
   store("ss.options", o);
 }
@@ -853,6 +867,7 @@ function restoreOptions() {
   $("opt-channel").value = o.channel || "";
   $("opt-to").value = o.to || "";
   $("opt-to-other").value = o.toOther || "";
+  $("opt-container").value = o.container === "mp4" ? "mp4" : "mkv";
 }
 
 // resetOptions: the standard choices — detect the language, silence filter
@@ -864,6 +879,7 @@ function resetOptions() {
   $("opt-to").value = "";
   $("opt-to-other").value = "";
   $("opt-outmode").value = "beside";
+  $("opt-container").value = "mkv";
   optionIds.forEach((id) => { $(id).checked = id === "opt-vad"; });
   syncOptionUI();
   saveOptions();
@@ -874,6 +890,7 @@ function syncOptionUI() {
   $("opt-lang-other-wrap").hidden = $("opt-lang").value !== "other";
   $("opt-to-other").hidden = $("opt-to").value !== "other";
   $("opt-lean").disabled = $("opt-srtonly").checked;
+  $("opt-container").disabled = $("opt-srtonly").checked;
   $("opt-outdir").textContent = $("opt-outmode").value === "folder" ? outDir : "";
 }
 
@@ -900,7 +917,8 @@ function readOptions() {
     force: $("opt-force").checked,
     outDir: $("opt-outmode").value === "folder" ? outDir : "",
     channel: $("opt-channel").value,
-    translateTo: to
+    translateTo: to,
+    container: $("opt-container").value
   };
 }
 
@@ -918,7 +936,7 @@ function setRunning(running, stopping) {
   $("split-stop").disabled = !running || state.kind !== "split";
   ["sub-add-files", "sub-add-folder", "sub-clear", "merge-add-files", "merge-clear", "split-add-files", "split-add-folder",
     "split-clear", "split-track", "opt-reset", "about-setup-run", "about-download", "settings-defaults", "cleaner-defaults"].forEach((id) => { $(id).disabled = running; });
-  optionIds.concat(["opt-lang", "opt-lang-other", "opt-outmode", "opt-channel", "opt-to", "opt-to-other"]).forEach((id) => { $(id).disabled = running; });
+  optionIds.concat(["opt-lang", "opt-lang-other", "opt-outmode", "opt-channel", "opt-to", "opt-to-other", "opt-container", "merge-container"]).forEach((id) => { $(id).disabled = running; });
   if (!running) syncOptionUI();
 }
 
@@ -968,7 +986,7 @@ async function startMerge() {
     $("merge-bar").className = "bar busy";
     // Next to the video, always: the Subtitle page's "Results" choice is not
     // visible here and must not decide silently where a merge lands.
-    await App().StartMerge("", sel.video, sel.extras);
+    await App().StartMerge("", sel.video, sel.extras, $("merge-container").value);
     App().ShowBusy();
   } catch (e) {
     setRunning(false);
@@ -1113,7 +1131,8 @@ function onState(s) {
     const r = m.rows[m.order[0]];
     const ok = r && r.status === "done";
     $("merge-bar").firstElementChild.style.width = ok ? "100%" : "0";
-    $("merge-status").textContent = ok ? "Merged → " + L.baseName(r.outputs[0]) : ("Not merged: " + ((r && r.message) || "see the log"));
+    // A message on success says why an MP4 became an MKV.
+    $("merge-status").textContent = ok ? "Merged → " + L.baseName(r.outputs[0]) + (r.message ? " · " + r.message : "") : ("Not merged: " + ((r && r.message) || "see the log"));
   } else if (m && m.kind === "split") {
     renderSplit();
     const c = L.counts(m);
@@ -1491,9 +1510,11 @@ async function init() {
     $(id).addEventListener("wheel", () => { lastUserScroll[page] = Date.now(); }, { passive: true });
   });
 
-  optionIds.concat(["opt-lang", "opt-lang-other", "opt-channel", "opt-to", "opt-to-other"]).forEach((id) => {
+  optionIds.concat(["opt-lang", "opt-lang-other", "opt-channel", "opt-to", "opt-to-other", "opt-container"]).forEach((id) => {
     $(id).addEventListener("change", () => { syncOptionUI(); saveOptions(); });
   });
+  $("merge-container").value = load("ss.mergeContainer", "mkv") === "mp4" ? "mp4" : "mkv";
+  $("merge-container").addEventListener("change", () => { store("ss.mergeContainer", $("merge-container").value); });
   $("opt-outmode").addEventListener("change", async () => {
     if ($("opt-outmode").value === "folder") {
       const dir = await App().PickOutputFolder().catch(() => "");
