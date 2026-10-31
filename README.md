@@ -16,7 +16,7 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?logo=go)](#-building-from-source)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](#-license)
 
-**[⬇️ Download the latest release](https://github.com/burnersen/SuperSubtitler/releases/latest)** · **[🌐 Website](https://tech.burnersen.de/en/tools/supersubtitler-en/)** · **[☕ Buy me a coffee](https://ko-fi.com/T5G0219GA6)**
+**[⬇️ Download the latest release](https://github.com/burnersen/SuperSubtitler/releases/latest)** · **[🌐 Website](https://tech.burnersen.de/en/tools/supersubtitler-en/)** · **[🔏 Code signing policy](CODE_SIGNING.md)** · **[☕ Buy me a coffee](https://ko-fi.com/T5G0219GA6)**
 
 <sub>🇩🇪 Auf Deutsch: [tech.burnersen.de/tools/supersubtitler](https://tech.burnersen.de/tools/supersubtitler/)</sub>
 
@@ -153,7 +153,9 @@ Two plain-text files are created next to the EXE on first run:
 
 ## 🛡️ Windows SmartScreen / antivirus warnings
 
-Windows or your antivirus may warn you the first time you run `SuperSubtitler.exe`. The honest reason: **the EXE is not code-signed.** Signing certificates cost hundreds of euros per year, and this is a free hobby project with zero income. Unsigned Go binaries are frequent false-positive targets; there's nothing I can do about it except be transparent.
+Windows or your antivirus may warn you the first time you run `SuperSubtitler.exe`. The honest reason: **the EXE is not code-signed yet.** Signing certificates cost hundreds of euros per year, and this is a free hobby project with zero income. Free code signing through the [SignPath Foundation](https://signpath.org) is applied for and already prepared; see the [code signing policy](CODE_SIGNING.md). Until then, unsigned Go binaries are frequent false-positive targets, and all I can do is be transparent.
+
+Every release is built by GitHub Actions from this repository ([release workflow](.github/workflows/release.yml)), never on a private PC.
 
 You don't have to trust me blindly:
 
@@ -172,6 +174,8 @@ build.bat
 ```
 
 The window lives in `gui/` and has its own `gui/build.bat` (writes `SuperSubtitlerGUI.exe` next to `SuperSubtitler.exe`).
+
+Releases are built by the [release workflow](.github/workflows/release.yml) on GitHub. It also writes name and version into the file properties of both exes (from [`winres/winres.json`](winres/winres.json) and [`gui/winres/winres.json`](gui/winres/winres.json)) and, once code signing is switched on, has them signed: see [`.signpath/README.md`](.signpath/README.md). "Run workflow" with "dry run" ticked builds and checks everything without publishing.
 
 `build.bat` runs `go mod tidy` and compiles `SuperSubtitler.exe` (Go 1.22+). The only external dependency is [pterm](https://github.com/pterm/pterm). The EXE is written to the parent folder, ready to run next to its downloaded FFmpeg/Python/models.
 
@@ -212,6 +216,10 @@ SuperSubtitler — the console tool and the window in [`gui/`](gui/) — is free
 - **A separate license for companies:** Want to build SuperSubtitler into a product that is not meant to be under the GPLv3? You can ask the author for a separate license — just [open an issue](https://github.com/burnersen/SuperSubtitler/issues).
 
 Versions up to and including 0.1.0 were released under the PolyForm Noncommercial License 1.0.0; from 0.2.0 on, SuperSubtitler is under the GPLv3.
+
+### Code signing and privacy
+
+What is signed, who approves it and what SuperSubtitler downloads (the runtime on first run, and the window's update check): [code signing policy](CODE_SIGNING.md). Your videos never leave your PC. To uninstall, delete the folder; nothing is written to the registry.
 
 ### Third-party components
 

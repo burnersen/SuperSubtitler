@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for SuperSubtitler (see
+  ../.github/workflows/release.yml). Copy it into the SignPath project as
+  its default artifact configuration.
+
+  The workflow uploads both exes as one ZIP. Only these two files are
+  signed, and only if their file properties name SuperSubtitler and the
+  version of the release. The runtime (Python, packages, FFmpeg, models)
+  is never part of a release: SuperSubtitler downloads it on first run.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <!-- The version of the release, e.g. 0.4.2 (appVersion in main.go). -->
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="SuperSubtitler.exe" product-name="SuperSubtitler" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="SuperSubtitlerGUI.exe" product-name="SuperSubtitler" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
