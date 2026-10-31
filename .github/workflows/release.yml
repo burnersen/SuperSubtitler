@@ -9,6 +9,18 @@
 #     the tag is then created by the release itself, on the commit built.
 # The version must match appVersion (main.go) and guiVersion (gui/main.go),
 # so a release can never carry an exe that names a different version.
+#
+# Dry run: tick "dry run" when starting it by hand. Both exes are built and
+# checked and stay on the run page as a workflow artifact; nothing is signed
+# or published. Pull requests that change this workflow, the winres files
+# or .signpath/ get a dry run by themselves.
+#
+# Code signing (SignPath Foundation) is prepared but off until the
+# repository has the variable SIGNPATH_ORGANIZATION_ID and the secret
+# SIGNPATH_API_TOKEN; see .signpath/README.md. Without them the exes are
+# released unsigned, exactly as before. SHA256SUMS.txt is always made from
+# the files that are published, signed or not: the window's updater checks
+# its downloads against it.
 name: Release
 
 on:
@@ -19,13 +31,29 @@ on:
       tag:
         description: 'Version to release, e.g. v0.2.0'
         required: true
+      dry_run:
+        description: 'Dry run: build and check only, sign and publish nothing'
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - '.signpath/**'
+      - 'winres/**'
+      - 'gui/winres/**'
 
 permissions:
   contents: write
+  actions: read
+
+env:
+  DRY_RUN: ${{ github.event_name == 'pull_request' || inputs.dry_run == true }}
 
 jobs:
   release:
     runs-on: windows-latest
+    # Includes up to one hour of waiting for the signing approval.
+    timeout-minutes: 120
     env:
       TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
@@ -40,15 +68,37 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ("$env:TAG" -notmatch '^v\d+\.\d+\.\d+$') { Write-Host "::error::'$env:TAG' is not a version tag like v0.2.0"; exit 1 }
-          if (gh release view "$env:TAG" 2>$null) { Write-Host "::error::release $env:TAG exists already"; exit 1 }
-          $global:LASTEXITCODE = 0  # "release not found" above is the expected answer
-          $tag = "$env:TAG".TrimStart('v')
           $cli = (Select-String -Path main.go -Pattern 'const appVersion = "(.+)"').Matches[0].Groups[1].Value
           $gui = (Select-String -Path gui\main.go -Pattern 'const guiVersion = "(.+)"').Matches[0].Groups[1].Value
+          # A pull request has no tag: it builds the version in main.go.
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { $env:TAG = "v$cli" }
+          if ("$env:TAG" -notmatch '^v\d+\.\d+\.\d+$') { Write-Host "::error::'$env:TAG' is not a version tag like v0.2.0"; exit 1 }
+          if ($env:DRY_RUN -ne 'true') {
+            if (gh release view "$env:TAG" 2>$null) { Write-Host "::error::release $env:TAG exists already"; exit 1 }
+          }
+          $global:LASTEXITCODE = 0  # "release not found" above is the expected answer
+          $tag = "$env:TAG".TrimStart('v')
           Write-Host "tag $tag, SuperSubtitler $cli, window $gui"
           if ($cli -ne $tag -or $gui -ne $tag) { Write-Host "::error::versions do not match the tag"; exit 1 }
-          if (-not (Test-Path ".github\release\$env:TAG.md")) { Write-Host "::error::no release notes"; exit 1 }
+          if (-not (Test-Path ".github\release\$env:TAG.md")) {
+            if ($env:DRY_RUN -ne 'true') { Write-Host "::error::no release notes"; exit 1 }
+            Write-Host "::warning::no release notes .github\release\$env:TAG.md (fine for a dry run)"
+          }
+          # RELEASE_TAG, not TAG: TAG is already set for the whole job.
+          "RELEASE_TAG=$env:TAG" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "VERSION=$tag" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Name and version in the file properties of both exes (right-click >
+      # Properties > Details). SignPath only signs exes whose properties name
+      # SuperSubtitler and the version of the release.
+      - name: file properties
+        run: |
+          go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --out rsrc --arch amd64 --product-version $env:VERSION --file-version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Push-Location gui
+          go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --out rsrc --arch amd64 --product-version $env:VERSION --file-version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Pop-Location
 
       - name: build SuperSubtitler.exe
         run: |
@@ -60,11 +110,101 @@ jobs:
         working-directory: gui
         run: go build -trimpath -tags desktop,production -ldflags="-s -w -H windowsgui" -o ..\dist\SuperSubtitlerGUI.exe .
 
-      - name: publish
+      - name: check the file properties
+        run: ./.signpath/check-files.ps1 -ProductName SuperSubtitler -ProductVersion $env:VERSION -Path dist/SuperSubtitler.exe, dist/SuperSubtitlerGUI.exe
+
+      # --- code signing ------------------------------------------------------
+      - name: 'code signing: on or off?'
+        id: signing
         env:
-          GH_TOKEN: ${{ github.token }}
+          ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          HAS_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        run: |
+          $hasOrganization = -not [string]::IsNullOrWhiteSpace($env:ORGANIZATION_ID)
+          $hasToken = $env:HAS_TOKEN -eq 'true'
+          if ($env:DRY_RUN -eq 'true') {
+            $on = $false
+            Write-Host 'Dry run: nothing is signed.'
+          } elseif ($hasOrganization -ne $hasToken) {
+            Write-Host '::error::Code signing is half set up: SIGNPATH_ORGANIZATION_ID and SIGNPATH_API_TOKEN must both be set, or neither (see .signpath/README.md).'
+            exit 1
+          } else {
+            $on = $hasOrganization -and $hasToken
+            Write-Host ($(if ($on) { 'Code signing is on.' } else { 'Code signing is off: this release is unsigned.' }))
+          }
+          "enabled=$($on.ToString().ToLower())" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: 'code signing: collect the exes'
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          New-Item -ItemType Directory sign/unsigned -Force | Out-Null
+          Copy-Item dist/SuperSubtitler.exe, dist/SuperSubtitlerGUI.exe sign/unsigned/
+
+      - name: 'code signing: upload the exes'
+        id: unsigned
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned
+          path: sign/unsigned
+          if-no-files-found: error
+
+      - name: 'code signing: sign (approve the request in SignPath)'
+        if: steps.signing.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'SuperSubtitler' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: sign/signed
+          parameters: |
+            version: "${{ env.VERSION }}"
+
+      - name: 'code signing: take over the signed exes'
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          Copy-Item sign/signed/SuperSubtitler.exe, sign/signed/SuperSubtitlerGUI.exe dist/ -Force
+          ./.signpath/check-files.ps1 -ProductName SuperSubtitler -ProductVersion $env:VERSION -Path dist/SuperSubtitler.exe, dist/SuperSubtitlerGUI.exe -Signed
+
+      # The release page is the download page, so it links the code signing
+      # policy and says whether the exes of this release are signed.
+      - name: release text
+        env:
+          SIGNED: ${{ steps.signing.outputs.enabled }}
+        run: |
+          $policy = "https://github.com/$env:GITHUB_REPOSITORY/blob/main/CODE_SIGNING.md"
+          if ($env:SIGNED -eq 'true') {
+            $footer = "Both exes are signed. Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). [Code signing policy]($policy)"
+          } else {
+            $footer = "The exes are not code signed, so Windows SmartScreen may warn. [Code signing policy]($policy)"
+          }
+          $notes = ".github\release\$env:RELEASE_TAG.md"
+          $text = if (Test-Path $notes) { [IO.File]::ReadAllText($notes) } else { '' }
+          $text = $text.TrimEnd() + "`n`n---`n`n$footer`n"
+          [IO.File]::WriteAllText("$env:RUNNER_TEMP\release-notes.md", $text, [Text.UTF8Encoding]::new($false))
+
+      - name: checksums
         run: |
           Get-FileHash dist\*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content dist\SHA256SUMS.txt
           Get-Content dist\SHA256SUMS.txt
-          gh release create "$env:TAG" dist\SuperSubtitler.exe dist\SuperSubtitlerGUI.exe dist\SHA256SUMS.txt `
-            --target "${{ github.sha }}" --title "SuperSubtitler $env:TAG" --notes-file ".github\release\$env:TAG.md" --latest
+
+      - name: 'dry run: keep the files on the run page'
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dry-run
+          path: dist
+          retention-days: 7
+
+      - name: publish
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:RELEASE_TAG" dist\SuperSubtitler.exe dist\SuperSubtitlerGUI.exe dist\SHA256SUMS.txt `
+            --target "${{ github.sha }}" --title "SuperSubtitler $env:RELEASE_TAG" --notes-file "$env:RUNNER_TEMP\release-notes.md" --latest
