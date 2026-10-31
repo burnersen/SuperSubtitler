@@ -159,7 +159,7 @@ Two plain-text files are created next to the EXE on first run:
 
 ## 🛡️ Windows SmartScreen / antivirus warnings
 
-Windows or your antivirus may warn you the first time you run `SuperSubtitler.exe`. The honest reason: **the EXE is not code-signed yet.** Signing certificates cost hundreds of euros per year, and this is a free hobby project with zero income. Free code signing through the [SignPath Foundation](https://signpath.org) is applied for and already prepared; see the [code signing policy](CODE_SIGNING.md). Until then, unsigned Go binaries are frequent false-positive targets, and all I can do is be transparent.
+Windows or your antivirus may warn you the first time you run `SuperSubtitler.exe`. The honest reason: **the EXE is not code-signed yet.** Signing certificates cost hundreds of euros per year, and this is a free hobby project with zero income. Free code signing through the [SignPath Foundation](https://signpath.org) is planned and already prepared, as soon as SuperSubtitler is known well enough to qualify; see the [code signing policy](CODE_SIGNING.md). Until then, unsigned Go binaries are frequent false-positive targets, and all I can do is be transparent.
 
 Every release is built by GitHub Actions from this repository ([release workflow](.github/workflows/release.yml)), never on a private PC.
 
