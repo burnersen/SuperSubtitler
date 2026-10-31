@@ -25,7 +25,7 @@ import (
 
 // appVersion is shown in the startup header so the running build is obvious.
 // Keep it in sync with the GitHub release tag on every release.
-const appVersion = "0.4.2"
+const appVersion = "0.4.3"
 
 // pterm prefix printers, shared across the package.
 var (
