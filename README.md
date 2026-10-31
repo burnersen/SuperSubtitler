@@ -213,7 +213,6 @@ SuperSubtitler — the console tool and the window in [`gui/`](gui/) — is free
 - **Use it:** Anyone may use SuperSubtitler free of charge, at home or at work, and read, change and share its source code.
 - **The one condition:** Whoever passes on SuperSubtitler or parts of it — unchanged, changed or built into a program of their own — must include the complete source code and pass everything on under the same license. A closed, paid product with SuperSubtitler inside is therefore not possible.
 - **Free of charge:** SuperSubtitler is and stays free. The official source is [github.com/burnersen/SuperSubtitler](https://github.com/burnersen/SuperSubtitler) — anyone asking money for SuperSubtitler is selling you what you can get here for free.
-- **A separate license for companies:** Want to build SuperSubtitler into a product that is not meant to be under the GPLv3? You can ask the author for a separate license — just [open an issue](https://github.com/burnersen/SuperSubtitler/issues).
 
 Versions up to and including 0.1.0 were released under the PolyForm Noncommercial License 1.0.0; from 0.2.0 on, SuperSubtitler is under the GPLv3.
 
