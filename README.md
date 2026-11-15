@@ -21,9 +21,9 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 
 <sub>🇩🇪 Auf Deutsch: [tech.burnersen.de/tools/supersubtitler](https://tech.burnersen.de/tools/supersubtitler/)</sub>
 
-<img src=".github/screenshot.png" alt="The SuperSubtitlerGUI window translating a German film to English: the file with its language and live progress, the options on the right, SuperSubtitler's own log at the bottom" width="840">
+<img src=".github/screenshot.png" alt="The SuperSubtitlerGUI window (version 0.4.3) translating German episodes to English: files with language and live progress, the options on the right, SuperSubtitler's own log at the bottom" width="840">
 
-*SuperSubtitlerGUI at work: a German film being translated to English — progress per file and on the taskbar, every option one click away.*
+*SuperSubtitlerGUI at work: German episodes being translated to English, with progress per file and every option one click away. The window itself (its real page) with made-up sample files; [dark theme](.github/screenshot-dark.png).*
 
 </div>
 
