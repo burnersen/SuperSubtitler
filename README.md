@@ -15,6 +15,7 @@ Subtitles appear **only while someone is speaking** — no subtitles stuck on sc
 [![faster-whisper](https://img.shields.io/badge/engine-faster--whisper-blue)](https://github.com/SYSTRAN/faster-whisper)
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?logo=go)](#-building-from-source)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](#-license)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/burnersen)
 
 **[⬇️ Download the latest release](https://github.com/burnersen/SuperSubtitler/releases/latest)** · **[🌐 Website](https://tech.burnersen.de/en/tools/supersubtitler-en/)** · **[🔏 Code signing policy](CODE_SIGNING.md)** · **[☕ Buy me a coffee](https://ko-fi.com/T5G0219GA6)**
 
@@ -193,16 +194,11 @@ SuperSubtitler is a personal hobby project. I wanted subtitles that behave: text
 
 ---
 
-## ❤️ Support
+## ☕ Support
 
-SuperSubtitler is a hobby project, free for personal use. If it saved you hours of typing:
+SuperSubtitler is free and made in my spare time, on my own hardware and electricity bill. If it saved you hours of typing and you'd like to say thanks, you can [drop a little something in the tip jar on Ko-fi](https://ko-fi.com/burnersen), it keeps motivation and coffee flowing. ☕ Completely optional, and either way: thank you for using it!
 
-- ⭐ **Star this repo** — fame is the currency here
-- ☕ **Buy me a coffee** — keeps the project going:
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/T5G0219GA6)
-
-Found a bug? Open an issue with the console output.
+Found a bug? [Open an issue](https://github.com/burnersen/SuperSubtitler/issues) with the console output.
 
 ---
 
