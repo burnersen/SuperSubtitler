@@ -204,7 +204,9 @@ Found a bug? [Open an issue](https://github.com/burnersen/SuperSubtitler/issues)
 
 ## ⚠️ Disclaimer
 
-SuperSubtitler is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See sections 15 and 16 of the [license](LICENSE).
+SuperSubtitler is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. Automatic subtitles and translations can be wrong; check them before you rely on them.
+
+Where this README describes what SuperSubtitler does, checks or never does, that is how it is designed to work, not a promise or guarantee: software can have bugs, and systems, services and other programs do not always behave as expected. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See sections 15 and 16 of the [license](LICENSE).
 
 ---
 
