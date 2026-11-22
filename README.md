@@ -184,7 +184,7 @@ The window lives in `gui/` and has its own `gui/build.bat` (writes `SuperSubtitl
 
 Releases are built by the [release workflow](.github/workflows/release.yml) on GitHub. It also writes name and version into the file properties of both exes (from [`winres/winres.json`](winres/winres.json) and [`gui/winres/winres.json`](gui/winres/winres.json)) and, once code signing is switched on, has them signed: see [`.signpath/README.md`](.signpath/README.md). "Run workflow" with "dry run" ticked builds and checks everything without publishing.
 
-`build.bat` runs `go mod tidy` and compiles `SuperSubtitler.exe` (Go 1.22+). The only external dependency is [pterm](https://github.com/pterm/pterm). The EXE is written to the parent folder, ready to run next to its downloaded FFmpeg/Python/models.
+`build.bat` runs `go mod tidy` and compiles `SuperSubtitler.exe` (Go 1.27.4 or newer). The only external dependency is [pterm](https://github.com/pterm/pterm). The EXE is written to the parent folder, ready to run next to its downloaded FFmpeg/Python/models.
 
 ---
 
